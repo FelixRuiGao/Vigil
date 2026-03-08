@@ -1,0 +1,12 @@
+type: agent
+name: explorer
+description: "Explores files and directories. Summarizes contents, answers questions about code structure, and extracts key information. Read-only."
+system_prompt_file: system_prompt.md
+tools:
+  - read_file
+  - list_dir
+  - grep
+  - glob
+  - web_search
+  - web_fetch
+max_tool_rounds: 200

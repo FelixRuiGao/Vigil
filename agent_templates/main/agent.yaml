@@ -1,0 +1,6 @@
+type: agent
+name: main
+description: "Primary agent — handles coding, review, debugging, exploration, and orchestration. Uses important log, context resets, and sub-agents."
+system_prompt_file: system_prompt.md
+tools: all
+max_tool_rounds: 1000

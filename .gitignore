@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+config.yaml
+config.local.yaml
+*.local.yaml
+*.local.md
+*.local.json
+.DS_Store
+.venv/
+.claude/
+.longeragent-artifacts/
+.agentflow-artifacts/
