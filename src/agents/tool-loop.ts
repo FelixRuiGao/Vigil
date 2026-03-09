@@ -664,6 +664,12 @@ export async function asyncRunToolLoop(
           ? lastRoundId
           : undefined;
 
+      // Propagate contentBlocks to metadata for multimodal tool results
+      const mergedMetadata = { ...resolved.metadata };
+      if (resolved.contentBlocks) {
+        mergedMetadata._contentBlocks = resolved.contentBlocks;
+      }
+
       // Create tool_result entry
       const preview = extractToolPreview(resolved.metadata);
       appendEntry(createToolResultEntry(
@@ -679,7 +685,7 @@ export async function asyncRunToolLoop(
         {
           isError: resolved.content.startsWith("ERROR:"),
           contextId: toolResultContextId,
-          toolMetadata: resolved.metadata,
+          toolMetadata: mergedMetadata,
           previewText: preview?.text,
           previewDim: preview?.dim,
         },

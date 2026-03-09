@@ -30,6 +30,7 @@ import {
   loadProjectedDocumentView,
   projectedDocumentLabel,
 } from "../document-projection.js";
+import { classifyFile, IMAGE_MEDIA_TYPES } from "../file-attach.js";
 
 // ------------------------------------------------------------------
 // Bash safety limits
@@ -72,6 +73,7 @@ const BASH_ENV_ALLOWLIST = new Set([
 const READ_MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 const READ_MAX_LINES = 1000;
 const READ_MAX_CHARS = 50_000;
+const READ_MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB limit for images
 
 // ------------------------------------------------------------------
 // Search safety limits
@@ -496,7 +498,8 @@ async function toolReadFile(
   startLine?: number,
   endLine?: number,
   artifactsDir?: string,
-): Promise<string> {
+  supportsMultimodal?: boolean,
+): Promise<string | ToolResult> {
   const sensitiveReason = getSensitiveFileReadReason(filePath);
   if (sensitiveReason) {
     return `ERROR: Access to sensitive file is blocked by default: ${filePath} (${sensitiveReason}).`;
@@ -515,6 +518,46 @@ async function toolReadFile(
 
   if (!stat.isFile()) {
     return `ERROR: Not a file: ${filePath}`;
+  }
+
+  // --- Image file handling ---
+  const [isImage] = classifyFile(filePath);
+  if (isImage) {
+    if (!supportsMultimodal) {
+      return `ERROR: Cannot read image file: current model does not support multimodal input. File: ${filePath}`;
+    }
+    if (stat.size > READ_MAX_IMAGE_SIZE) {
+      const sizeMB = (stat.size / 1024 / 1024).toFixed(1);
+      return `ERROR: Image too large (${sizeMB} MB, limit ${READ_MAX_IMAGE_SIZE / 1024 / 1024} MB).`;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mediaType = IMAGE_MEDIA_TYPES[ext] ?? "application/octet-stream";
+    try {
+      const raw = readFileSync(filePath);
+      const b64Data = raw.toString("base64");
+      const sizeFmt = stat.size < 1024
+        ? `${stat.size} B`
+        : stat.size < 1024 * 1024
+          ? `${(stat.size / 1024).toFixed(1)} KB`
+          : `${(stat.size / (1024 * 1024)).toFixed(1)} MB`;
+      const description = `[Image: ${path.basename(filePath)} | ${mediaType} | ${sizeFmt}]`;
+      return new ToolResult({
+        content: description,
+        contentBlocks: [
+          { type: "text", text: description },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: mediaType,
+              data: b64Data,
+            },
+          },
+        ],
+      });
+    } catch (e) {
+      return `ERROR: Failed to read image: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
 
   if (stat.size > READ_MAX_FILE_SIZE) {
@@ -1637,6 +1680,7 @@ export interface ExecuteToolContext {
   projectRoot?: string;
   externalPathAllowlist?: string[];
   sessionArtifactsDir?: string;
+  supportsMultimodal?: boolean;
 }
 
 class ToolArgValidationError extends Error {
@@ -2203,6 +2247,7 @@ function createDispatch(ctx?: ExecuteToolContext): Record<string, ToolExecutor> 
           startLine,
           endLine,
           ctx?.sessionArtifactsDir,
+          ctx?.supportsMultimodal,
         );
       } catch (e) {
         return formatToolError("read_file", e);

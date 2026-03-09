@@ -60,7 +60,7 @@ const BINARY_EXTENSIONS = new Set([
 const AT_PATTERN =
   /(?:^|(?<=\s))@(?:"([^"]+)"|'([^']+)'|(\S+))/g;
 
-const IMAGE_MEDIA_TYPES: Record<string, string> = {
+export const IMAGE_MEDIA_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",

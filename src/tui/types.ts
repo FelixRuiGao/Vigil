@@ -90,6 +90,14 @@ export interface Session {
   appendStatusMessage?(text: string, statusType?: string): void;
   /** Append a persisted error line to the log. */
   appendErrorMessage?(text: string, errorType?: string): void;
+  /** Return all skills (enabled + disabled) for UI display. */
+  getAllSkillNames?(): { name: string; description: string; enabled: boolean }[];
+  /** Enable or disable a skill by name. */
+  setSkillEnabled?(name: string, enabled: boolean): void;
+  /** Rescan disk and rebuild skill state. */
+  reloadSkills?(): { added: string[]; removed: string[]; total: number };
+  /** Read-only access to loaded skills. */
+  skills?: ReadonlyMap<string, unknown>;
 }
 
 // ------------------------------------------------------------------
@@ -112,6 +120,10 @@ export type ConversationEntryKind =
 export interface ConversationEntry {
   kind: ConversationEntryKind;
   text: string;
+  /** Timestamp when this entry was created (Unix ms). Used for tool call timing. */
+  startedAt?: number;
+  /** Elapsed time in ms (set when the matching tool_result is found). */
+  elapsedMs?: number;
   id?: string;
   /** Whether this user message is queued for delivery (agent is working). */
   queued?: boolean;

@@ -106,8 +106,6 @@ export const KNOWN_MULTIMODAL_MODELS: Set<string> = new Set([
   "claude-haiku-4.5", "claude-opus-4.6", "claude-sonnet-4.6",
   // Kimi
   "kimi-k2.5",
-  // MiniMax
-  "MiniMax-M2.1", "minimax-m2.1",
 ]);
 
 export const KNOWN_THINKING_MODELS: Set<string> = new Set([

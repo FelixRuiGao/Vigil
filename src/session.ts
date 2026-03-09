@@ -55,7 +55,7 @@ import {
   executeTool,
 } from "./tools/basic.js";
 import { execSummarizeContextOnLog } from "./summarize-context.js";
-import { resolveSkillContent, type SkillMeta } from "./skills/loader.js";
+import { resolveSkillContent, loadSkillsMulti, type SkillMeta } from "./skills/loader.js";
 import { toolBuiltinWebSearchPassthrough } from "./tools/web-search.js";
 import {
   processFileAttachments,
@@ -232,7 +232,7 @@ const SYSTEM_PREFIXES = [
 ];
 
 const COMM_TOOL_NAMES = new Set([
-  "spawn_agent", "kill_agent", "check_status", "wait", "show_context", "summarize_context", "ask", "skill",
+  "spawn_agent", "kill_agent", "check_status", "wait", "show_context", "summarize_context", "ask", "skill", "reload_skills",
   "bash_background", "bash_output", "kill_shell", "plan",
 ]);
 
@@ -397,6 +397,8 @@ export class Session {
 
   // Skills
   private _skills = new Map<string, SkillMeta>();
+  private _skillRoots: string[] = [];
+  private _disabledSkills = new Set<string>();
 
   // Artifacts / persistence
   private _store: any;
@@ -453,6 +455,7 @@ export class Session {
     config: Config;
     agentTemplates?: Record<string, Agent>;
     skills?: Map<string, SkillMeta>;
+    skillRoots?: string[];
     progress?: ProgressReporter;
     mcpManager?: MCPClientManager;
     promptsDirs?: string[];
@@ -463,6 +466,7 @@ export class Session {
     this.config = opts.config;
     this.agentTemplates = opts.agentTemplates ?? {};
     this._skills = opts.skills ?? new Map();
+    this._skillRoots = opts.skillRoots ?? [];
     this._progress = opts.progress;
     this._mcpManager = opts.mcpManager;
     this._promptsDirs = opts.promptsDirs;
@@ -1141,6 +1145,7 @@ export class Session {
         projectRoot: this._projectRoot,
         externalPathAllowlist: [this._resolveSessionArtifacts()],
         sessionArtifactsDir: this._resolveSessionArtifacts(),
+        supportsMultimodal: this.primaryAgent.modelConfig.supportsMultimodal,
       });
 
     return {
@@ -1170,6 +1175,7 @@ export class Session {
       ask: (args) => this._execAsk(args),
       plan: (args) => this._execPlan(args),
       skill: (args) => this._execSkill(args),
+      reload_skills: () => this._execReloadSkills(),
       $web_search: (args) => toolBuiltinWebSearchPassthrough(args as Record<string, unknown>),
     };
   }
@@ -1194,6 +1200,58 @@ export class Session {
   /** Read-only access to loaded skills (for command registration). */
   get skills(): ReadonlyMap<string, SkillMeta> {
     return this._skills;
+  }
+
+  /** Read-only access to disabled skill names. */
+  get disabledSkills(): ReadonlySet<string> {
+    return this._disabledSkills;
+  }
+
+  /**
+   * Return all skills from disk (both enabled and disabled) for UI display.
+   */
+  getAllSkillNames(): { name: string; description: string; enabled: boolean }[] {
+    const allOnDisk = loadSkillsMulti(this._skillRoots);
+    return [...allOnDisk.values()].map((s) => ({
+      name: s.name,
+      description: s.description,
+      enabled: !this._disabledSkills.has(s.name),
+    }));
+  }
+
+  /** Enable or disable a skill by name. Call reloadSkills() afterwards. */
+  setSkillEnabled(name: string, enabled: boolean): void {
+    if (enabled) {
+      this._disabledSkills.delete(name);
+    } else {
+      this._disabledSkills.add(name);
+    }
+  }
+
+  /**
+   * Rescan skill directories, apply disabled filter, and rebuild
+   * the skill tool definition + re-register slash commands.
+   */
+  reloadSkills(): { added: string[]; removed: string[]; total: number } {
+    const oldNames = new Set(this._skills.keys());
+    const freshAll = loadSkillsMulti(this._skillRoots);
+
+    // Apply disabled filter
+    const filtered = new Map<string, SkillMeta>();
+    for (const [name, skill] of freshAll) {
+      if (!this._disabledSkills.has(name)) {
+        filtered.set(name, skill);
+      }
+    }
+
+    const newNames = new Set(filtered.keys());
+    const added = [...newNames].filter((n) => !oldNames.has(n));
+    const removed = [...oldNames].filter((n) => !newNames.has(n));
+
+    this._skills = filtered;
+    this._ensureSkillTool();
+
+    return { added, removed, total: filtered.size };
   }
 
   /**
@@ -1236,16 +1294,44 @@ export class Session {
     };
   }
 
-  /** Add the skill tool to the primary agent if skills are available. */
+  private _buildReloadSkillsToolDef(): ToolDef {
+    return {
+      name: "reload_skills",
+      description:
+        "Rescan skill directories, update the in-memory skills map, and rebuild the skill tool definition. " +
+        "Use after installing, removing, or modifying skills on disk.",
+      parameters: { type: "object", properties: {} },
+      summaryTemplate: "{agent} is reloading skills",
+    };
+  }
+
+  /** Add the skill + reload_skills tools to the primary agent. */
   private _ensureSkillTool(): void {
-    const toolDef = this._buildSkillToolDef();
-    if (toolDef) {
-      // Remove old skill tool if present (e.g. from previous session restore)
-      this.primaryAgent.tools = this.primaryAgent.tools.filter(
-        (t) => t.name !== "skill",
-      );
-      this.primaryAgent.tools.push(toolDef);
+    // Remove old skill-related tools
+    this.primaryAgent.tools = this.primaryAgent.tools.filter(
+      (t) => t.name !== "skill" && t.name !== "reload_skills",
+    );
+
+    const skillDef = this._buildSkillToolDef();
+    if (skillDef) {
+      this.primaryAgent.tools.push(skillDef);
     }
+
+    // Always add reload_skills if there are skill roots configured
+    if (this._skillRoots.length > 0) {
+      this.primaryAgent.tools.push(this._buildReloadSkillsToolDef());
+    }
+  }
+
+  /** Execute the `reload_skills` tool. */
+  private _execReloadSkills(): ToolResult {
+    const result = this.reloadSkills();
+    const lines = [`Skills reloaded. Total active: ${result.total}`];
+    if (result.added.length) lines.push(`Added: ${result.added.join(", ")}`);
+    if (result.removed.length) lines.push(`Removed: ${result.removed.join(", ")}`);
+    const current = [...this._skills.keys()];
+    lines.push(`\nCurrently available: ${current.join(", ") || "(none)"}`);
+    return new ToolResult({ content: lines.join("\n") });
   }
 
   /** Execute the `skill` tool — load and return skill instructions. */
@@ -1360,6 +1446,12 @@ export class Session {
       prefs.thinkingLevel,
     );
     this._cacheHitEnabled = prefs.cacheHitEnabled;
+
+    // Restore disabled skills
+    if (prefs.disabledSkills && prefs.disabledSkills.length > 0) {
+      this._disabledSkills = new Set(prefs.disabledSkills);
+      this.reloadSkills();
+    }
   }
 
   getGlobalPreferences(): GlobalTuiPreferences {
@@ -1370,6 +1462,9 @@ export class Session {
       thinkingLevel: this._preferredThinkingLevel,
       cacheHitEnabled: this._preferredCacheHitEnabled,
       accentColor: this._preferredAccentColor,
+      disabledSkills: this._disabledSkills.size > 0
+        ? [...this._disabledSkills]
+        : undefined,
     });
   }
 

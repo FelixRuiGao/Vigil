@@ -103,10 +103,19 @@ export class OpenAIChatProvider extends BaseProvider {
       const m = msg as Record<string, unknown>;
 
       if (m["role"] === "tool_result") {
+        // OpenAI Chat API tool results only accept string content;
+        // extract text from multimodal content blocks if present.
+        const rawContent = m["content"];
+        const textContent = Array.isArray(rawContent)
+          ? (rawContent as Array<Record<string, unknown>>)
+              .filter((b) => b["type"] === "text")
+              .map((b) => b["text"] as string)
+              .join("\n") || String(rawContent)
+          : rawContent;
         const entry: Record<string, unknown> = {
           role: "tool",
           tool_call_id: m["tool_call_id"],
-          content: m["content"],
+          content: textContent,
         };
         if (m["tool_name"]) {
           entry["name"] = m["tool_name"];

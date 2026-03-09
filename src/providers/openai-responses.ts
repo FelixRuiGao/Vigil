@@ -18,8 +18,22 @@ import {
   type ToolDef,
 } from "./base.js";
 
-// o-series models that don't support temperature
+// Models that don't support `temperature` on OpenAI Responses API.
 const O_SERIES_RE = /^o\d/;
+const GPT5_SERIES_RE = /^gpt-5(?:$|[.-])/;
+
+function normalizeModelId(model: string): string {
+  const idx = model.lastIndexOf("/");
+  return idx >= 0 ? model.slice(idx + 1) : model;
+}
+
+function supportsTemperature(model: string): boolean {
+  const normalized = normalizeModelId(model).toLowerCase();
+  return !(
+    O_SERIES_RE.test(normalized)
+    || GPT5_SERIES_RE.test(normalized)
+  );
+}
 
 export class OpenAIResponsesProvider extends BaseProvider {
   /**
@@ -145,10 +159,19 @@ export class OpenAIResponsesProvider extends BaseProvider {
           }
         }
       } else if (role === "tool_result") {
+        // OpenAI Responses API only accepts string output;
+        // extract text from multimodal content blocks if present.
+        const rawOutput = m["content"];
+        const textOutput = Array.isArray(rawOutput)
+          ? (rawOutput as Array<Record<string, unknown>>)
+              .filter((b) => b["type"] === "text")
+              .map((b) => b["text"] as string)
+              .join("\n") || String(rawOutput)
+          : rawOutput;
         items.push({
           type: "function_call_output",
           call_id: m["tool_call_id"],
-          output: m["content"],
+          output: textOutput,
         });
       }
     }
@@ -315,8 +338,8 @@ export class OpenAIResponsesProvider extends BaseProvider {
       input: inputItems,
     };
 
-    // Temperature (skip for o-series)
-    if (!O_SERIES_RE.test(this._config.model)) {
+    // Temperature (skip for model families that reject this field).
+    if (supportsTemperature(this._config.model)) {
       const temp =
         options?.temperature !== undefined
           ? options.temperature

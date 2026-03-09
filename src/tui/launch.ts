@@ -18,6 +18,7 @@ const KITTY_KEYBOARD_ENABLE = "\u001b[>1u";
 const KITTY_KEYBOARD_DISABLE = "\u001b[<u";
 const BRACKETED_PASTE_ENABLE = "\u001b[?2004h";
 const BRACKETED_PASTE_DISABLE = "\u001b[?2004l";
+const SET_TERMINAL_TITLE = "\u001b]0;LongerAgent\u0007";
 
 function shouldEnableKittyKeyboard(): boolean {
   if (process.env["LONGERAGENT_DISABLE_KITTY_KEYBOARD"] === "1") return false;
@@ -88,6 +89,7 @@ export async function launchTui(
   let ttyFeaturesEnabled = false;
   if (process.stdout.isTTY === true) {
     try {
+      process.stdout.write(SET_TERMINAL_TITLE);
       process.stdout.write(BRACKETED_PASTE_ENABLE);
       if (shouldEnableKittyKeyboard()) {
         process.stdout.write(KITTY_KEYBOARD_ENABLE);

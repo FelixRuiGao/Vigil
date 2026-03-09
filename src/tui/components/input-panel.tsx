@@ -47,6 +47,14 @@ import {
   moveCommandPickerSelection,
   type CommandPickerState,
 } from "../command-picker.js";
+import {
+  createCheckboxPicker,
+  isCheckboxPickerActive,
+  getCheckboxPickerVisibleRange,
+  moveCheckboxSelection,
+  toggleCheckboxItem,
+  type CheckboxPickerState,
+} from "../checkbox-picker.js";
 import { theme } from "../theme.js";
 
 // ------------------------------------------------------------------
@@ -217,6 +225,35 @@ function CommandPickerView({ picker }: { picker: CommandPickerState }): React.Re
   );
 }
 
+function CheckboxPickerView({ picker }: { picker: CheckboxPickerState }): React.ReactElement | null {
+  if (!isCheckboxPickerActive(picker)) return null;
+  const { start, end } = getCheckboxPickerVisibleRange(picker);
+  const visibleItems = picker.items.slice(start, end);
+
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Text color={theme.accent}>{picker.title}</Text>
+      {visibleItems.map((item, i) => {
+        const actualIndex = start + i;
+        const checkbox = item.checked ? "[x]" : "[ ]";
+        return (
+          <Text
+            key={`checkbox-${actualIndex}`}
+            color={actualIndex === picker.selected ? theme.accent : "gray"}
+            bold={actualIndex === picker.selected}
+          >
+            {actualIndex === picker.selected ? " > " : "   "}
+            {checkbox} {item.label}
+          </Text>
+        );
+      })}
+      <Text color="gray" dimColor>
+        {"  Space toggle · Enter confirm · Esc cancel"}
+      </Text>
+    </Box>
+  );
+}
+
 // ------------------------------------------------------------------
 // InputPanel
 // ------------------------------------------------------------------
@@ -248,6 +285,7 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
     const [cursor, setCursor] = useState(0);
     const [overlay, setOverlay] = useState<OverlayState>(EMPTY_OVERLAY);
     const [picker, setPicker] = useState<CommandPickerState | null>(null);
+    const [checkboxPicker, setCheckboxPicker] = useState<CheckboxPickerState | null>(null);
 
     const valueRef = useRef("");
     const cursorRef = useRef(0);
@@ -268,6 +306,7 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
 
     const hidePicker = useCallback(() => {
       setPicker(null);
+      setCheckboxPicker(null);
     }, []);
 
     const buildCommandOptions = useCallback(
@@ -284,9 +323,22 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
 
     const startCommandPicker = useCallback(
       (cmdName: string): boolean => {
+        const cmd = commandRegistry.lookup(cmdName);
         const options = buildCommandOptions(cmdName);
         if (options.length === 0) return false;
         hideOverlay();
+
+        if (cmd?.checkboxMode) {
+          // Use checkbox picker for multi-select commands like /skills
+          const items = options.map((o) => ({
+            label: o.label,
+            value: o.value,
+            checked: o.checked !== false,
+          }));
+          setCheckboxPicker(createCheckboxPicker(cmdName, items, Math.min(items.length, 15)));
+          return true;
+        }
+
         setPicker(
           createCommandPicker(
             cmdName,
@@ -296,7 +348,7 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
         );
         return true;
       },
-      [buildCommandOptions, hideOverlay],
+      [commandRegistry, buildCommandOptions, hideOverlay],
     );
 
     // ----- Build overlay items for /command prefix ----- //
@@ -396,6 +448,10 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
     }, [commitEditorState]);
 
     const dismissOverlay = useCallback((): boolean => {
+      if (checkboxPicker) {
+        hidePicker();
+        return true;
+      }
       if (picker) {
         hidePicker();
         return true;
@@ -403,7 +459,7 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
       if (!overlay.visible) return false;
       hideOverlay();
       return true;
-    }, [picker, overlay.visible, hideOverlay, hidePicker]);
+    }, [checkboxPicker, picker, overlay.visible, hideOverlay, hidePicker]);
 
     React.useImperativeHandle(ref, () => ({
       clear: clearInput,
@@ -604,6 +660,10 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
           return;
         }
         case "overlay_hide": {
+          if (checkboxPicker) {
+            hidePicker();
+            return;
+          }
           if (picker) {
             const nextPicker = exitCommandPickerLevel(picker);
             if (nextPicker) {
@@ -631,12 +691,13 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
       hidePicker,
       maybeStartPickerFromSubmittedText,
       picker,
+      checkboxPicker,
       resetTurnPasteState,
     ]);
 
     const handleInsert = useCallback(
       (rawText: string, source: "typing" | "paste") => {
-        if (picker) {
+        if (checkboxPicker || picker) {
           onHintRequested?.("Picker is active. Press Esc to go back, Ctrl+C to close.", 2500);
           return;
         }
@@ -667,12 +728,52 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
         const next = insertText(state, textToInsert);
         commitEditorState(next.value, next.cursor, next.preferredColumn);
       },
-      [commitEditorState, onHintRequested, picker],
+      [commitEditorState, onHintRequested, picker, checkboxPicker],
     );
 
     const handleInputEvent = useCallback(
       (event: InputEvent) => {
         if (disabled) return;
+
+        // Checkbox picker takes priority
+        if (checkboxPicker) {
+          if (event.type === "insert") {
+            // Space toggles the current item
+            if (event.text === " ") {
+              setCheckboxPicker((prev) => (prev ? toggleCheckboxItem(prev) : prev));
+            }
+            return;
+          }
+          if (event.key === "escape") {
+            hidePicker();
+            return;
+          }
+          if (event.key === "up" || (event.key === "tab" && event.shift)) {
+            setCheckboxPicker((prev) => (prev ? moveCheckboxSelection(prev, -1) : prev));
+            return;
+          }
+          if (event.key === "down" || event.key === "tab") {
+            setCheckboxPicker((prev) => (prev ? moveCheckboxSelection(prev, 1) : prev));
+            return;
+          }
+          if (event.key === "enter") {
+            // Submit: collect checked items and invoke command
+            const enabledValues = checkboxPicker.items
+              .filter((it) => it.checked)
+              .map((it) => it.value)
+              .join(",");
+            const cmdStr = `${checkboxPicker.title} ${enabledValues}`.trim();
+            hidePicker();
+            const accepted = onSubmit(cmdStr);
+            if (accepted) clearInput();
+            return;
+          }
+          const command = mapInputEventToCommand(event);
+          if (command === "overlay_hide") {
+            hidePicker();
+          }
+          return;
+        }
 
         if (picker) {
           if (event.type === "insert") {
@@ -775,6 +876,7 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
       [
         disabled,
         picker,
+        checkboxPicker,
         overlay.visible,
         overlay.mode,
         acceptPickerSelection,
@@ -783,6 +885,8 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
         handleInsert,
         hideOverlay,
         hidePicker,
+        clearInput,
+        onSubmit,
         completeCommandSelection,
         onHintRequested,
       ],
@@ -817,19 +921,21 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
     const renderedInput = renderValueWithCursor(
       viewport.text,
       viewport.cursor,
-      !disabled && !picker,
+      !disabled && !picker && !checkboxPicker,
       turnPasteSlotsRef.current,
     ).replaceAll(
       "\n",
       `\n${PROMPT_INDENT}`,
     );
-    const pickerHint = picker
+    const pickerHint = checkboxPicker
+      ? "  Space toggle · Enter confirm · Esc cancel"
+      : picker
       ? "  Enter select · Esc back/close · Ctrl+C close"
       : null;
 
     return (
       <Box flexDirection="column" marginTop={2}>
-        {picker ? <CommandPickerView picker={picker} /> : <OverlayView state={overlay} />}
+        {checkboxPicker ? <CheckboxPickerView picker={checkboxPicker} /> : picker ? <CommandPickerView picker={picker} /> : <OverlayView state={overlay} />}
         <Box
           borderStyle="single"
           borderTop

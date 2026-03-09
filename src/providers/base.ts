@@ -135,17 +135,26 @@ export class ToolResult {
   actionHint?: string;
   tags: string[];
   metadata: Record<string, unknown>;
+  /**
+   * Optional multimodal content blocks for providers that support them
+   * (e.g. Anthropic tool_result with image blocks).
+   * When present, providers should use these instead of `content` string.
+   * The `content` string still serves as the text fallback / TUI display.
+   */
+  contentBlocks?: Array<Record<string, unknown>>;
 
   constructor(opts: {
     content: string;
     actionHint?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
+    contentBlocks?: Array<Record<string, unknown>>;
   }) {
     this.content = opts.content;
     this.actionHint = opts.actionHint;
     this.tags = opts.tags ?? [];
     this.metadata = opts.metadata ?? {};
+    this.contentBlocks = opts.contentBlocks;
   }
 
   toString(): string {

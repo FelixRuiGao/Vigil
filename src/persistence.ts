@@ -247,6 +247,7 @@ export class SessionStore {
           thinkingLevel: raw.thinking_level ?? "default",
           accentColor: raw.accent_color ?? undefined,
           cacheHitEnabled: raw.cache_hit_enabled ?? true,
+          disabledSkills: Array.isArray(raw.disabled_skills) ? raw.disabled_skills : undefined,
         });
       } catch {
         continue;
@@ -274,6 +275,7 @@ export class SessionStore {
             thinking_level: payload.thinkingLevel,
             cache_hit_enabled: payload.cacheHitEnabled,
             accent_color: payload.accentColor ?? null,
+            disabled_skills: payload.disabledSkills ?? null,
           }, null, 2),
         );
         renameSync(tmp, file);
@@ -374,6 +376,7 @@ export interface GlobalTuiPreferences {
   thinkingLevel: string;
   cacheHitEnabled: boolean;
   accentColor?: string;
+  disabledSkills?: string[];
 }
 
 export function createGlobalTuiPreferences(

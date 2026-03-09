@@ -79,6 +79,7 @@ export const TOOL_PROMPT_ORDER: string[] = [
   // Interaction
   "ask",
   "skill",
+  "reload_skills",
 ];
 
 /**

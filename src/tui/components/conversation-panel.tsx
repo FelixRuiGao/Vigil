@@ -6,7 +6,7 @@
  * marked + marked-terminal with width-aware reflow.
  */
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import { Marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -640,16 +640,54 @@ export function SubAgentDoneView({ text }: { text: string }): React.ReactElement
   );
 }
 
-export function ToolCallView({ text }: { text: string }): React.ReactElement {
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export function ToolCallView({
+  text,
+  startedAt,
+  elapsedMs,
+}: {
+  text: string;
+  startedAt?: number;
+  elapsedMs?: number;
+}): React.ReactElement {
   const trimmed = text.trim();
   const firstSpace = trimmed.indexOf(" ");
   const toolName = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
   const rest = firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1);
 
+  // Live timer for in-progress tool calls
+  const [liveMs, setLiveMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (elapsedMs !== undefined || !startedAt) {
+      setLiveMs(null);
+      return;
+    }
+    // Update every 100ms for smooth display
+    setLiveMs(Date.now() - startedAt);
+    const interval = setInterval(() => {
+      setLiveMs(Date.now() - startedAt);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [startedAt, elapsedMs]);
+
+  const timeDisplay = elapsedMs !== undefined
+    ? formatElapsed(elapsedMs)
+    : liveMs !== null
+    ? formatElapsed(liveMs)
+    : null;
+
   return (
     <Box>
       <Text color="cyan">{"- "}{toolName}</Text>
-      {rest ? <Text dimColor>{" "}{rest}</Text> : null}
+      {timeDisplay ? (
+        <Text dimColor>{" ("}{timeDisplay}{elapsedMs !== undefined ? "" : "…"}{") "}</Text>
+      ) : null}
+      {rest ? <Text dimColor>{rest}</Text> : null}
     </Box>
   );
 }
@@ -762,7 +800,7 @@ export function ConversationPanel({
           case "sub_agent_done":
             return <SubAgentDoneView key={key} text={entry.text} />;
           case "tool_call":
-            return <ToolCallView key={key} text={entry.text} />;
+            return <ToolCallView key={key} text={entry.text} startedAt={entry.startedAt} elapsedMs={entry.elapsedMs} />;
           case "tool_result":
             return <ToolResultView key={key} text={entry.text} dim={entry.dim} />;
           case "reasoning":

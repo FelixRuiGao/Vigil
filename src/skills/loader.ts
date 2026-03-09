@@ -93,6 +93,7 @@ export function loadSkills(skillsRoot: string): Map<string, SkillMeta> {
   }
 
   for (const entry of readdirSync(skillsRoot)) {
+    if (entry === ".staging") continue;
     const dirPath = join(skillsRoot, entry);
     if (!statSync(dirPath).isDirectory()) continue;
 
@@ -191,6 +192,22 @@ export function resolveSkillContent(skill: SkillMeta, args: string): string {
 // ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
+
+/**
+ * Load skills from multiple root directories (e.g. bundled + user).
+ * Later roots override earlier ones by skill name.
+ */
+export function loadSkillsMulti(roots: string[]): Map<string, SkillMeta> {
+  const merged = new Map<string, SkillMeta>();
+  for (const root of roots) {
+    if (!existsSync(root) || !statSync(root).isDirectory()) continue;
+    const found = loadSkills(root);
+    for (const [name, skill] of found) {
+      merged.set(name, skill); // later roots override earlier (user > bundled)
+    }
+  }
+  return merged;
+}
 
 /** Extract the first non-empty paragraph from markdown text. */
 function extractFirstParagraph(text: string): string {

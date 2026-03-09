@@ -20,12 +20,13 @@ import { Config, resolveConfigPaths, getBundledAssetsDir } from "./config.js";
 import { Agent } from "./agents/agent.js";
 import { Session } from "./session.js";
 import { loadTemplates } from "./templates/loader.js";
-import { loadSkills } from "./skills/loader.js";
+import { loadSkillsMulti } from "./skills/loader.js";
 import { SessionStore } from "./persistence.js";
 import { loadSettingsFile, resolveSettings } from "./settings.js";
 import {
   buildDefaultRegistry,
   registerSkillCommands,
+  reRegisterSkillCommands,
   resolveModelSelection,
 } from "./commands.js";
 import type { Session as TuiSession } from "./tui/types.js";
@@ -186,10 +187,10 @@ async function main(): Promise<void> {
 
   // Load skills (user overrides layered on top of bundled defaults).
   const bundledSkills = join(bundledDir, "skills");
-  const bundledSkillMap = existsSync(bundledSkills) && statSync(bundledSkills).isDirectory()
-    ? loadSkills(bundledSkills)
-    : new Map();
-  let skills = bundledSkillMap;
+  const skillRoots: string[] = [];
+  if (existsSync(bundledSkills) && statSync(bundledSkills).isDirectory()) {
+    skillRoots.push(bundledSkills);
+  }
   const userSkillsPath = paths.skillsPath;
   if (
     userSkillsPath &&
@@ -197,15 +198,9 @@ async function main(): Promise<void> {
     existsSync(userSkillsPath) &&
     statSync(userSkillsPath).isDirectory()
   ) {
-    const userSkillMap = loadSkills(userSkillsPath);
-    if (userSkillMap.size > 0) {
-      const merged = new Map(bundledSkillMap);
-      for (const [name, skill] of userSkillMap.entries()) {
-        merged.set(name, skill);
-      }
-      skills = merged;
-    }
+    skillRoots.push(userSkillsPath);
   }
+  const skills = loadSkillsMulti(skillRoots);
 
   // Session store (session directory is created lazily on the first turn)
   let store: SessionStore;
@@ -228,6 +223,7 @@ async function main(): Promise<void> {
     config,
     agentTemplates: agents as never,
     skills: skills as never,
+    skillRoots,
     progress: undefined,
     mcpManager: mcpManager as never,
     promptsDirs,

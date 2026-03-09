@@ -1,34 +1,47 @@
 # LongerAgent
 
-**Multi-agent CLI with proactive context management.**
+**The AI coding agent that never forgets.**
 
-LongerAgent is a terminal-based AI coding agent built around a structured session log. The log is the single source of truth — the TUI display and provider input are both projections of the same data, which means long sessions survive summarization, compaction, and resume without state drift.
+Most AI agents crash, loop, or silently lose context when conversations get long. LongerAgent is built from the ground up for sessions that last hours — with a structured log architecture, three-layer context management, and persistent memory that survives across sessions.
 
-## Highlights
+![LongerAgent Terminal UI](assets/screenshot.png)
 
-### Proactive Context Management
+---
 
-Most agents crash or silently lose information when conversations get long. LongerAgent has a three-layer system that keeps context under control:
+## Why LongerAgent
 
-1. **Hint Compression** — As context grows, the system prompts the agent to summarize older segments
-2. **Agent-Initiated Summarization** — The agent uses `show_context` to inspect its context distribution and `summarize_context` to compress selected segments into dense summaries, preserving key decisions, file paths, and unresolved issues
-3. **Auto-Compact** — Near the context limit, the system performs a full context reset with a continuation summary and archive window
+### Sessions That Actually Last
 
-Thresholds for all three layers are configurable via `settings.json`.
+Other agents hit the context window and fall apart. LongerAgent has three layers working together to keep things under control:
 
-### Multi-Agent Coordination
+1. **Hint Compression** — As context grows, the system prompts the agent to proactively summarize older segments
+2. **Agent-Initiated Summarization** — The agent inspects its own context distribution via `show_context` and surgically compresses selected segments with `summarize_context`, preserving key decisions and unresolved issues
+3. **Auto-Compact** — Near the limit, the system performs a full context reset with a continuation summary — the agent picks up exactly where it left off
+
+The agent also maintains an **Important Log** — a persistent engineering notebook that survives every compaction. Key discoveries, failed approaches, and architectural decisions are never lost.
+
+### Persistent Memory Across Sessions
+
+Two `AGENTS.md` files are automatically loaded on every turn:
+
+- **`~/AGENTS.md`** — Global preferences and conventions across all projects
+- **`<project>/AGENTS.md`** — Project-specific architecture insights and patterns
+
+These files persist across sessions and context resets. The agent reads them for background context and can write to them to save long-term knowledge.
+
+### Parallel Sub-Agents
 
 Spawn sub-agents from YAML call files for parallel work. Three built-in templates:
 
-- **main** — Full-capability agent with all 23 tools
+- **main** — Full-capability agent with all tools
 - **explorer** — Read-only agent for codebase exploration
 - **executor** — Task-focused agent with basic tools, no orchestration overhead
 
-Sub-agents run concurrently. The main agent tracks their progress via `check_status` / `wait` and receives structured reports when they complete.
+Sub-agents run concurrently. The main agent tracks their progress via `check_status` / `wait` and receives structured reports when they complete. The TUI shows real-time tool call timing for every operation.
 
-### Message Delivery During Work
+### Talk While It Works
 
-You can type messages to the agent at any time — even while it's working. Messages are queued and delivered at activation boundaries or when the agent calls `check_status` / `wait`. The agent receives a notification summary so it knows when new input is available.
+Type messages at any time — even while the agent is mid-task. Messages are queued and delivered at activation boundaries. The agent receives a notification so it knows when new input arrived.
 
 ## Quick Start
 
@@ -36,10 +49,10 @@ You can type messages to the agent at any time — even while it's working. Mess
 # Install globally
 npm install -g longer-agent
 
-# Run the setup wizard (creates ~/.longeragent/config.yaml and empty override dirs)
+# Run the setup wizard (creates ~/.longeragent/config.yaml)
 longeragent init
 
-# Start LongerAgent
+# Start
 longeragent
 ```
 
@@ -47,7 +60,7 @@ longeragent
 
 | Provider | Models | Env Variable |
 |----------|--------|-------------|
-| **Anthropic** | Claude Haiku 4.5, Opus 4.6, Sonnet 4.6 (+ 1M context beta variants) | `ANTHROPIC_API_KEY` |
+| **Anthropic** | Claude Haiku 4.5, Opus 4.6, Sonnet 4.6 (+ 1M context variants) | `ANTHROPIC_API_KEY` |
 | **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5.3 Codex, GPT-5.4 | `OPENAI_API_KEY` |
 | **Kimi / Moonshot (China)** | Kimi K2.5, K2 Instruct | `KIMI_CN_API_KEY` |
 | **Kimi / Moonshot (Global)** | Kimi K2.5, K2 Instruct | `KIMI_API_KEY` |
@@ -61,13 +74,15 @@ longeragent
 
 `read_file` · `list_dir` · `glob` · `grep` · `edit_file` · `write_file` · `apply_patch` · `bash` · `bash_background` · `bash_output` · `kill_shell` · `diff` · `test` · `web_search` · `web_fetch`
 
+`read_file` supports image files (PNG, JPG, GIF, WebP, etc.) on multimodal models — the agent can directly see and analyze images.
+
 **8 orchestration tools:**
 
 `spawn_agent` · `kill_agent` · `check_status` · `wait` · `show_context` · `summarize_context` · `ask` · `plan`
 
-**+ Skills system** — Load reusable skill definitions as a dynamic `skill` tool.
+**Skills system** — Load reusable skill definitions as a dynamic `skill` tool. Manage with `/skills` (checkbox picker for enable/disable), hot-reload with `reload_skills`. Includes a built-in `skill-manager` that teaches the agent to search, download, and install new skills autonomously.
 
-**+ MCP Integration** — Connect to Model Context Protocol servers for additional tools.
+**MCP Integration** — Connect to Model Context Protocol servers for additional tools.
 
 ## Slash Commands
 
@@ -75,29 +90,28 @@ longeragent
 |---------|-------------|
 | `/model` | Switch between configured models at runtime |
 | `/thinking` | Control thinking/reasoning depth per model |
+| `/skills` | Enable/disable skills with a checkbox picker |
 | `/resume` | Resume a previous session from its log |
 | `/compact` | Manually trigger context compaction |
 
 ## Configuration
 
-LongerAgent loads bundled defaults from the installed package (`agent_templates/`, `prompts/`, `skills/`) and user overrides from `~/.longeragent/`.
-`longeragent init` creates `config.yaml` plus empty `agent_templates/` and `skills/` override directories.
+LongerAgent loads bundled defaults from the installed package and user overrides from `~/.longeragent/`.
+`longeragent init` creates `config.yaml` plus empty override directories.
 
 ```text
 ~/.longeragent/
 ├── config.yaml            # Model and provider configurations (created by init)
-├── settings.json          # Runtime tuning (optional, user-managed)
+├── settings.json          # Runtime tuning (optional)
 ├── tui-preferences.json   # Auto-saved TUI state
-├── agent_templates/       # Optional user template overrides (empty by default)
-├── skills/                # Optional user skills (empty by default)
-└── prompts/               # Optional user prompt overrides (create manually if needed)
+├── agent_templates/       # User template overrides
+├── skills/                # User skills
+└── prompts/               # User prompt overrides
 ```
 
 See [configExample.yaml](./configExample.yaml) for a configuration reference.
 
 ### Runtime Settings (`settings.json`)
-
-Manually edit `~/.longeragent/settings.json` to tune runtime behavior:
 
 ```jsonc
 {
@@ -118,9 +132,9 @@ Manually edit `~/.longeragent/settings.json` to tune runtime behavior:
 LongerAgent is built around a **Session → Agent → Provider** pipeline:
 
 - **Session** orchestrates the turn loop, message delivery, summarization, compaction, and sub-agent lifecycle
-- **Session Log** is the single source of truth — 20 entry types capture every runtime event
+- **Session Log** is the single source of truth — 20+ entry types capture every runtime event; the TUI display and provider input are both projections of the same data
 - **Agent** wraps a model + system prompt + tools into a reusable execution unit
-- **Provider** adapters normalize streaming, reasoning, tool calls, and usage across 6 provider families
+- **Provider** adapters normalize streaming, reasoning, tool calls, and usage across 7 provider families
 
 ## CLI Options
 

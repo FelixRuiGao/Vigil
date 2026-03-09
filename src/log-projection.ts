@@ -54,7 +54,10 @@ function isProjectableTuiEntry(entry: LogEntry): boolean {
   return true;
 }
 
-function toConversationEntry(entry: LogEntry): ConversationEntry {
+function toConversationEntry(
+  entry: LogEntry,
+  toolElapsedMap?: Map<string, number>,
+): ConversationEntry {
   if (entry.type === "sub_agent_end") {
     const subAgentId = entry.meta["subAgentId"];
     const subAgentName = entry.meta["subAgentName"];
@@ -81,6 +84,16 @@ function toConversationEntry(entry: LogEntry): ConversationEntry {
     id: entry.id,
   };
   if (entry.meta["tuiDim"]) ce.dim = true;
+
+  // Attach timing info for tool_call entries
+  if (entry.type === "tool_call") {
+    ce.startedAt = entry.timestamp;
+    const toolCallId = entry.meta["toolCallId"];
+    if (typeof toolCallId === "string" && toolElapsedMap?.has(toolCallId)) {
+      ce.elapsedMs = toolElapsedMap.get(toolCallId);
+    }
+  }
+
   return ce;
 }
 
@@ -107,9 +120,35 @@ function buildSubAgentRollup(entries: LogEntry[]): ConversationEntry | null {
   };
 }
 
+/**
+ * Build a map of toolCallId → elapsed time (ms) by pairing
+ * tool_call and tool_result entries.
+ */
+function buildToolElapsedMap(entries: LogEntry[]): Map<string, number> {
+  const callTimestamps = new Map<string, number>();
+  const elapsed = new Map<string, number>();
+
+  for (const entry of entries) {
+    if (entry.type === "tool_call") {
+      const id = entry.meta["toolCallId"];
+      if (typeof id === "string") {
+        callTimestamps.set(id, entry.timestamp);
+      }
+    } else if (entry.type === "tool_result") {
+      const id = entry.meta["toolCallId"];
+      if (typeof id === "string" && callTimestamps.has(id)) {
+        elapsed.set(id, entry.timestamp - callTimestamps.get(id)!);
+      }
+    }
+  }
+
+  return elapsed;
+}
+
 function projectTuiWindow(entries: LogEntry[]): ConversationEntry[] {
   const result: ConversationEntry[] = [];
   const pendingSubAgentCalls: LogEntry[] = [];
+  const toolElapsedMap = buildToolElapsedMap(entries);
 
   const flushPendingSubAgentCalls = (): void => {
     const rollup = buildSubAgentRollup(pendingSubAgentCalls);
@@ -159,7 +198,7 @@ function projectTuiWindow(entries: LogEntry[]): ConversationEntry[] {
           candidate.roundIndex === roundIndex &&
           PRIMARY_ROUND_ENTRY_TYPES.has(candidate.type)
         ) {
-          result.push(toConversationEntry(candidate));
+          result.push(toConversationEntry(candidate, toolElapsedMap));
           i++;
           continue;
         }
@@ -177,7 +216,7 @@ function projectTuiWindow(entries: LogEntry[]): ConversationEntry[] {
       flushPendingSubAgentCalls();
     }
 
-    result.push(toConversationEntry(entry));
+    result.push(toConversationEntry(entry, toolElapsedMap));
     i++;
   }
 
@@ -440,11 +479,15 @@ export function projectToApiMessages(
         // Remove from annotations so only the first tool_result per group gets it
         annotations.delete(String(trCtxId));
       }
+      // Check for multimodal content blocks in metadata
+      const toolMeta = (entry.meta as Record<string, unknown>)["toolMetadata"] as Record<string, unknown> | undefined;
+      const contentBlocks = toolMeta?.["_contentBlocks"] as Array<Record<string, unknown>> | undefined;
+
       const trMsg: InternalMessage = {
         role: "tool_result",
         tool_call_id: entry.meta.toolCallId,
         tool_name: entry.meta.toolName,
-        content: trContent,
+        content: contentBlocks ?? trContent,
         tool_summary: resultContent.toolSummary,
       };
       if (trCtxId !== undefined) trMsg["_context_id"] = trCtxId;

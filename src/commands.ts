@@ -85,6 +85,8 @@ export interface CommandOption {
   value: string;
   /** Child options for hierarchical selection (e.g., provider → model). */
   children?: CommandOption[];
+  /** Checked state for checkbox picker mode. */
+  checked?: boolean;
 }
 
 /** Context available when building dynamic picker options for a slash command. */
@@ -109,6 +111,8 @@ export interface SlashCommand {
    * Receives session/store context so it can compute dynamic picker options.
    */
   options?: (ctx: CommandOptionsContext) => CommandOption[];
+  /** When true, TUI uses a checkbox multi-select picker instead of single-select. */
+  checkboxMode?: boolean;
 }
 
 export class CommandExitSignal extends Error {
@@ -137,6 +141,11 @@ export class CommandRegistry {
   /** Register a command. Overwrites any existing command with the same name. */
   register(cmd: SlashCommand): void {
     this._commands.set(cmd.name, cmd);
+  }
+
+  /** Remove a command by its exact name. Returns true if it existed. */
+  unregister(name: string): boolean {
+    return this._commands.delete(name);
   }
 
   /** Look up a command by its exact name. */
@@ -922,7 +931,68 @@ export function buildDefaultRegistry(): CommandRegistry {
   registry.register({ name: "/thinking", description: "Set thinking level", handler: cmdThinking, options: thinkingOptions });
   registry.register({ name: "/cachehit", description: "Prompt caching", handler: cmdCacheHit, options: cacheHitOptions });
   registry.register({ name: "/theme", description: "Change accent color", handler: cmdTheme, options: themeOptions });
+  registry.register({ name: "/skills", description: "Manage installed skills", handler: cmdSkills, options: skillsOptions, checkboxMode: true });
   return registry;
+}
+
+// ------------------------------------------------------------------
+// /skills command
+// ------------------------------------------------------------------
+
+function skillsOptions(ctx: CommandOptionsContext): CommandOption[] {
+  const session = ctx.session;
+  if (!session?.getAllSkillNames) return [];
+  const allSkills = session.getAllSkillNames();
+  if (allSkills.length === 0) return [];
+
+  return allSkills.map((s: { name: string; description: string; enabled: boolean }) => ({
+    label: `${s.name}  ${s.description.length > 50 ? s.description.slice(0, 47) + "..." : s.description}`,
+    value: s.name,
+    checked: s.enabled,
+  }));
+}
+
+async function cmdSkills(ctx: CommandContext, args: string): Promise<void> {
+  const session = ctx.session;
+  if (!session?.getAllSkillNames) {
+    ctx.showMessage("Skills system not available.");
+    return;
+  }
+
+  const trimmed = args.trim();
+  if (!trimmed) {
+    // No args — show list
+    const allSkills = session.getAllSkillNames();
+    if (allSkills.length === 0) {
+      ctx.showMessage("No skills installed.");
+      return;
+    }
+    const lines = ["Installed skills:"];
+    for (const s of allSkills) {
+      lines.push(`  ${s.enabled ? "[x]" : "[ ]"} ${s.name} — ${s.description}`);
+    }
+    ctx.showMessage(lines.join("\n"));
+    return;
+  }
+
+  // Checkbox picker submits comma-separated enabled skill names
+  // Parse: all items were submitted, enabled ones are in the args
+  const enabledNames = new Set(trimmed.split(",").map((s: string) => s.trim()).filter(Boolean));
+  const allSkills = session.getAllSkillNames();
+  const oldSkills = session.skills;
+
+  for (const s of allSkills) {
+    session.setSkillEnabled(s.name, enabledNames.has(s.name));
+  }
+  session.reloadSkills();
+
+  // Re-register slash commands
+  reRegisterSkillCommands(ctx.commandRegistry, oldSkills, session.skills);
+
+  const enabledCount = enabledNames.size;
+  const totalCount = allSkills.length;
+  ctx.showMessage(`Skills updated: ${enabledCount}/${totalCount} enabled.`);
+  persistGlobalPreferences(ctx);
 }
 
 // ------------------------------------------------------------------
@@ -961,4 +1031,19 @@ export function registerSkillCommands(
       },
     });
   }
+}
+
+/**
+ * Unregister old skill commands, then register new ones.
+ * Used after reloadSkills() to keep slash commands in sync.
+ */
+export function reRegisterSkillCommands(
+  registry: CommandRegistry,
+  oldSkills: ReadonlyMap<string, SkillMeta>,
+  newSkills: ReadonlyMap<string, SkillMeta>,
+): void {
+  for (const skill of oldSkills.values()) {
+    registry.unregister("/" + skill.name);
+  }
+  registerSkillCommands(registry, newSkills);
 }
