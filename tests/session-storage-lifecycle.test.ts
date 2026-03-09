@@ -11,9 +11,11 @@ import {
   LogIdAllocator,
   createAssistantText,
   createReasoning,
+  createSummary,
   createSystemPrompt,
   createTokenUpdate,
   createToolCall,
+  createUserMessage,
 } from "../src/log-entry.js";
 
 function makeTempDir(prefix: string): string {
@@ -24,7 +26,7 @@ function makeSession(projectRoot: string, store: SessionStore): Session {
   const modelConfig = {
     name: "test-model",
     provider: "openai",
-    model: "gpt-5",
+    model: "gpt-5.2",
     maxTokens: 256,
     contextLength: 8192,
     supportsMultimodal: false,
@@ -185,7 +187,7 @@ describe("session storage lifecycle", () => {
         version: 1,
         modelConfigName: "test-model",
         modelProvider: "openai",
-        modelId: "gpt-5",
+        modelId: "gpt-5.2",
         thinkingLevel: "high",
         cacheHitEnabled: false,
       });
@@ -295,6 +297,33 @@ describe("session storage lifecycle", () => {
       };
 
       await restored._runActivation();
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the first user message as persisted session summary after summarize", () => {
+    const baseDir = makeTempDir("longeragent-summary-base-");
+    const projectRoot = makeTempDir("longeragent-summary-project-");
+    try {
+      const store = new SessionStore({ baseDir, projectPath: projectRoot });
+      const session = makeSession(projectRoot, store) as any;
+
+      const firstUser = createUserMessage("user-001", 1, "First request", "First request", "c1");
+      firstUser.summarized = true;
+      firstUser.summarizedBy = "sum-001";
+
+      session._log.push(firstUser);
+      session._log.push(
+        createSummary("sum-001", 1, "Summary text", "Summary text", "c2", ["user-001"], 1),
+      );
+      session._log.push(
+        createUserMessage("user-002", 2, "Later request", "Later request", "c3"),
+      );
+
+      const persisted = session.getLogForPersistence();
+      expect(persisted.meta.summary).toBe("First request");
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
       rmSync(projectRoot, { recursive: true, force: true });

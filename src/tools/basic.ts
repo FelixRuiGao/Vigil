@@ -1,8 +1,9 @@
 /**
  * Built-in tool definitions and executors.
  *
- * 12 tools: read_file, list_dir, glob, grep, edit_file, write_file,
- * apply_patch, bash, diff, test, web_search, web_fetch.
+ * 15 tools: read_file, list_dir, glob, grep, edit_file, write_file,
+ * apply_patch, bash, bash_background, bash_output, kill_shell,
+ * diff, test, web_search, web_fetch.
  */
 
 import fs from "node:fs/promises";
@@ -386,6 +387,77 @@ const GREP: ToolDef = {
 };
 
 // ------------------------------------------------------------------
+// Background shell tools (tracked by Session)
+// ------------------------------------------------------------------
+
+export const BASH_BACKGROUND_TOOL: ToolDef = {
+  name: "bash_background",
+  description:
+    "Start a background shell command tracked by the Session. " +
+    "Use for dev servers, watchers, and long-running commands whose output you want to inspect later.",
+  parameters: {
+    type: "object",
+    properties: {
+      command: { type: "string", description: "Shell command to execute in the background." },
+      cwd: { type: "string", description: "Optional working directory for the command." },
+      id: {
+        type: "string",
+        description: "Optional stable shell ID. If omitted, the Session generates one.",
+      },
+    },
+    required: ["command"],
+  },
+  summaryTemplate: "{agent} is starting a background shell",
+};
+
+export const BASH_OUTPUT_TOOL: ToolDef = {
+  name: "bash_output",
+  description:
+    "Read output from a tracked background shell. " +
+    "By default, returns unread output since the last bash_output call for that shell. " +
+    "Use tail_lines to inspect recent output without advancing the unread cursor.",
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Tracked shell ID." },
+      tail_lines: {
+        type: "integer",
+        description: "Optional: return the last N lines without advancing unread state.",
+      },
+      max_chars: {
+        type: "integer",
+        description: "Optional max characters to return (default 8000).",
+      },
+    },
+    required: ["id"],
+  },
+  summaryTemplate: "{agent} is reading background shell output",
+};
+
+export const KILL_SHELL_TOOL: ToolDef = {
+  name: "kill_shell",
+  description:
+    "Terminate one or more tracked background shells. " +
+    "Use when a watcher or dev server is no longer needed, or a command is stuck.",
+  parameters: {
+    type: "object",
+    properties: {
+      ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Tracked shell IDs to terminate.",
+      },
+      signal: {
+        type: "string",
+        description: "Optional signal name (default TERM).",
+      },
+    },
+    required: ["ids"],
+  },
+  summaryTemplate: "{agent} is terminating background shells",
+};
+
+// ------------------------------------------------------------------
 // Exports: tool lists
 // ------------------------------------------------------------------
 
@@ -398,6 +470,9 @@ export const BASIC_TOOLS: ToolDef[] = [
   WRITE,
   APPLY_PATCH,
   BASH,
+  BASH_BACKGROUND_TOOL,
+  BASH_OUTPUT_TOOL,
+  KILL_SHELL_TOOL,
   DIFF,
   TEST,
   WEB_SEARCH,

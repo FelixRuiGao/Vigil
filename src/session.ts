@@ -31,7 +31,7 @@ import type {
 import { createEphemeralLogState } from "./ephemeral-log.js";
 import { isCompactMarker, allocateContextId, stripContextTags, ContextTagStripBuffer } from "./context-rendering.js";
 import { generateShowContext } from "./show-context.js";
-import { getThinkingLevels, type Config, type ModelConfig } from "./config.js";
+import { getThinkingLevels, getModelMaxOutputTokens, type Config, type ModelConfig } from "./config.js";
 import type { MCPClientManager } from "./mcp-client.js";
 import { ProgressEvent, type ProgressLevel, type ProgressReporter } from "./progress.js";
 import { ToolResult } from "./providers/base.js";
@@ -44,11 +44,15 @@ import {
   SHOW_CONTEXT_TOOL,
   SUMMARIZE_CONTEXT_TOOL,
   ASK_TOOL,
+  PLAN_TOOL,
+} from "./tools/comm.js";
+import {
   BASH_BACKGROUND_TOOL,
   BASH_OUTPUT_TOOL,
   KILL_SHELL_TOOL,
-  PLAN_TOOL,
-} from "./tools/comm.js";
+  buildBashEnv,
+  executeTool,
+} from "./tools/basic.js";
 import { execSummarizeContextOnLog } from "./summarize-context.js";
 import { resolveSkillContent, type SkillMeta } from "./skills/loader.js";
 import { toolBuiltinWebSearchPassthrough } from "./tools/web-search.js";
@@ -58,7 +62,6 @@ import {
   hasImages as fileAttachHasImages,
   parseReferences,
 } from "./file-attach.js";
-import { buildBashEnv, executeTool } from "./tools/basic.js";
 import { SafePathError, safePath } from "./security/path.js";
 import {
   AskPendingError,
@@ -107,6 +110,12 @@ import {
   type GlobalTuiPreferences,
   type LogSessionMeta,
 } from "./persistence.js";
+import {
+  type ResolvedSettings,
+  type ContextThresholds,
+  DEFAULT_THRESHOLDS,
+  computeHysteresisThresholds,
+} from "./settings.js";
 // ------------------------------------------------------------------
 // Constants
 // ------------------------------------------------------------------
@@ -114,29 +123,25 @@ import {
 const MAX_ACTIVATIONS_PER_TURN = 30;
 const SUB_AGENT_OUTPUT_LIMIT = 12_000;
 const SUB_AGENT_TIMEOUT = 600_000; // milliseconds
-
-// -- Auto-Compact thresholds --
-const COMPACT_OUTPUT_THRESHOLD = 0.85;     // compact trigger when no tool calls
-const COMPACT_TOOLCALL_THRESHOLD = 0.90;   // compact trigger when tool calls present
-// -- Hint two-tier thresholds --
-const HINT_LEVEL1_THRESHOLD = 0.60;       // level 1 hint trigger
-const HINT_LEVEL2_THRESHOLD = 0.80;       // level 2 hint trigger (auto-compact imminent)
-const HINT_RESET_NONE = 0.40;            // reset to 'none' when below this
-const HINT_RESET_LEVEL1 = 0.65;          // reset to 'level1_sent' when below this
 const MAX_COMPACT_PHASE_ROUNDS = 10;       // max activations during compact phase
 
 // -- Compact Prompt: Output scenario --
 const COMPACT_PROMPT_OUTPUT = `Distill this conversation into a continuation prompt — imagine you're writing a briefing for a fresh instance of yourself who must seamlessly pick up where we left off, with zero access to the original conversation.
 
+**Before writing the continuation prompt**, update your important log with any key discoveries, decisions, or insights from this session that aren't already recorded there. The important log survives compaction and will be visible to the new instance — this is your last chance to persist valuable knowledge.
+
+**What the new instance will already have:** your system prompt, the important log, and the active plan file (if any) are automatically re-injected after compact. Do not duplicate their contents in the continuation prompt — focus on what they don't cover: current progress, session-specific context, and in-flight work state.
+
 Your summary should capture everything that matters and nothing that doesn't. Use whatever structure best fits the actual content — there is no fixed template. But as you write, pressure-test yourself against these questions:
 
 - **What are we trying to do?** The user's intent, goals, and any constraints or preferences they've expressed — stated or implied.
-- **What do we know now that we didn't at the start?** Key discoveries, failed approaches, edge cases encountered, decisions made and *why*.
-- **Where exactly are we?** What's done, what's in progress, what's next. Be specific enough that work won't be repeated or skipped.
+- **What do we know now that we didn't at the start?** Key discoveries, failed approaches, edge cases encountered, decisions made and *why*. (Skip anything already in your important log.)
+- **Where exactly are we?** What's done, what's in progress, what's next. Be specific enough that work won't be repeated or skipped. (Skip anything already in your plan file.)
 - **What artifacts exist?** Files read, created, or modified — with enough context about each to be actionable (not just a path list).
 - **What tone/style/working relationship has been established?** If the user has shown preferences for how they like to collaborate, note them.
+- **What explicit rules has the user stated?** Direct instructions about how to work, what not to do, approval requirements, or behavioral constraints the user has explicitly communicated (e.g., "don't modify code until I approve", "always run tests before committing"). Preserve these verbatim — they are binding rules, not suggestions.
 
-Prioritize *actionability* over *completeness* — a concise insight that changes behavior is worth more than a paragraph of background that doesn't. Omit anything that a competent model could infer from the files or context alone.
+**Err on the side of preserving more, not less.** The continuation prompt is the sole bridge between this conversation and the next — anything omitted is permanently lost to the new instance. Include all information that could plausibly be useful for subsequent work: partial findings, open questions, code snippets you'll need to reference, relevant file paths with context. A longer, thorough continuation prompt that preserves useful context is far better than a terse one that forces the new instance to re-discover things.
 
 Write in natural prose. Use structure where it aids clarity, not for its own sake.`;
 
@@ -145,18 +150,48 @@ const COMPACT_PROMPT_TOOLCALL = `[SYSTEM: COMPACT REQUIRED] The conversation has
 
 You just made a tool call and received its result above. That result is real and should be reflected in your summary, but do not act on it — your only job right now is to write the continuation prompt.
 
+**Before writing the continuation prompt**, update your important log with any key discoveries, decisions, or insights from this session that aren't already recorded there. The important log survives compaction and will be visible to the new instance — this is your last chance to persist valuable knowledge.
+
+**What the new instance will already have:** your system prompt, the important log, and the active plan file (if any) are automatically re-injected after compact. Do not duplicate their contents in the continuation prompt — focus on what they don't cover: current progress, session-specific context, and in-flight work state.
+
 Write in natural prose. Use structure where it aids clarity, not for its own sake. As you write, pressure-test yourself against these questions:
 
 - **What are we trying to do?** The user's intent, goals, constraints, and preferences — stated or implied.
-- **What do we know now that we didn't at the start?** Key discoveries, failed approaches, edge cases encountered, decisions made and why.
+- **What do we know now that we didn't at the start?** Key discoveries, failed approaches, edge cases encountered, decisions made and why. (Skip anything already in your important log.)
 - **Where exactly did we stop?** Be precise: what was the last tool call, what did it return, and what was supposed to happen next? The new instance must be able to pick up mid-step without repeating or skipping anything.
-- **What's done, what's in progress, what remains?** Give a clear picture of overall progress, not just the interrupted step.
+- **What's done, what's in progress, what remains?** Give a clear picture of overall progress, not just the interrupted step. (Skip anything already in your plan file.)
 - **What artifacts exist?** Files read, created, or modified — with enough context about each to be actionable.
 - **What working style has the user shown?** Communication preferences, collaboration patterns, or explicit instructions about how they like to work.
+- **What explicit rules has the user stated?** Direct instructions about how to work, what not to do, approval requirements, or behavioral constraints (e.g., "don't modify code until I approve", "always run tests before committing"). Preserve these verbatim — they are binding rules, not suggestions.
 
-Prioritize actionability over completeness — a concise insight that changes behavior is worth more than a paragraph of background that a competent model could infer from files or context alone.
+**Err on the side of preserving more, not less.** The continuation prompt is the sole bridge between this conversation and the next — anything omitted is permanently lost to the new instance. Include all information that could plausibly be useful for subsequent work: partial findings, open questions, code snippets you'll need to reference, relevant file paths with context. A longer, thorough continuation prompt that preserves useful context is far better than a terse one that forces the new instance to re-discover things.
 
 End the summary with a clear, imperative statement of what the next instance should do first upon resuming.`;
+
+// -- Compact Prompt: Sub-agent (output scenario) --
+const SUB_AGENT_COMPACT_PROMPT_OUTPUT = `Your context is full. Write a continuation summary so a fresh instance of you can resume this task seamlessly.
+
+Capture:
+- **Task**: What you were asked to do and any constraints.
+- **Progress**: What's done, what's in progress, what remains.
+- **Key findings**: Discoveries, file paths, code references, decisions — anything the next instance needs to avoid re-doing work.
+- **Next step**: What to do first upon resuming.
+
+Be thorough — include all information that could be useful. The next instance has no access to this conversation.`;
+
+// -- Compact Prompt: Sub-agent (tool call scenario) --
+const SUB_AGENT_COMPACT_PROMPT_TOOLCALL = `[SYSTEM: COMPACT REQUIRED] Your context is full. Do NOT continue the task. Write a continuation summary instead.
+
+You just made a tool call and received its result above. Reflect that result in your summary, but do not act on it further.
+
+Capture:
+- **Task**: What you were asked to do and any constraints.
+- **Progress**: What's done, what's in progress, what remains.
+- **Last action**: What tool call you just made, what it returned, and what you planned to do next.
+- **Key findings**: Discoveries, file paths, code references, decisions — anything the next instance needs to avoid re-doing work.
+- **Next step**: What to do first upon resuming.
+
+Be thorough — include all information that could be useful. The next instance has no access to this conversation.`;
 
 const MANUAL_SUMMARIZE_PROMPT = [
   "Review the current active context and use `summarize_context` to compress older groups that are no longer needed in full.",
@@ -318,6 +353,7 @@ export class Session {
   primaryAgent: Agent;
   config: Config;
   agentTemplates: Record<string, Agent>;
+  private _promptsDir?: string;
 
   private _progress?: ProgressReporter;
   private _mcpManager?: MCPClientManager;
@@ -337,6 +373,14 @@ export class Session {
 
   // Compact phase
   private _compactInProgress = false;
+
+  // Context thresholds (from settings.json, or defaults)
+  private _thresholds: ContextThresholds = { ...DEFAULT_THRESHOLDS };
+  private _hintResetNone = DEFAULT_THRESHOLDS.summarize_hint_level1 / 100 - 0.20;
+  private _hintResetLevel1 = (DEFAULT_THRESHOLDS.summarize_hint_level1 + DEFAULT_THRESHOLDS.summarize_hint_level2) / 200;
+
+  // Global max_output_tokens override from settings.json
+  private _settingsMaxOutputTokens: number | undefined;
 
   // Hint compression (two-tier state machine)
   private _hintState: "none" | "level1_sent" | "level2_sent" = "none";
@@ -410,7 +454,9 @@ export class Session {
     skills?: Map<string, SkillMeta>;
     progress?: ProgressReporter;
     mcpManager?: MCPClientManager;
+    promptsDir?: string;
     store?: any;
+    settings?: ResolvedSettings;
   }) {
     this.primaryAgent = opts.primaryAgent;
     this.config = opts.config;
@@ -418,6 +464,12 @@ export class Session {
     this._skills = opts.skills ?? new Map();
     this._progress = opts.progress;
     this._mcpManager = opts.mcpManager;
+    this._promptsDir = opts.promptsDir;
+
+    // Apply user settings (thresholds + max_output_tokens)
+    if (opts.settings) {
+      this._applySettings(opts.settings);
+    }
 
     // Attach store if provided (must be set before _initConversation)
     if (opts.store) {
@@ -450,6 +502,29 @@ export class Session {
       createSystemPrompt(this._nextLogId("system_prompt"), systemPrompt),
       false,
     );
+  }
+
+  /**
+   * Apply resolved user settings (thresholds + max_output_tokens).
+   */
+  private _applySettings(s: ResolvedSettings): void {
+    this._thresholds = { ...s.thresholds };
+    const hysteresis = computeHysteresisThresholds(s.thresholds);
+    this._hintResetNone = hysteresis.hintResetNone / 100;
+    this._hintResetLevel1 = hysteresis.hintResetLevel1 / 100;
+    this._settingsMaxOutputTokens = s.maxOutputTokens;
+    // Apply to current primary agent's model config
+    this._applyMaxOutputTokensOverride(this.primaryAgent.modelConfig);
+  }
+
+  /**
+   * Effective maxTokens for a given ModelConfig, taking settings override into account.
+   * Clamps to [4096, modelMaxOutputTokens].
+   */
+  _effectiveMaxTokens(mc: ModelConfig): number {
+    if (this._settingsMaxOutputTokens === undefined) return mc.maxTokens;
+    const modelMax = getModelMaxOutputTokens(mc.model);
+    return Math.max(4096, Math.min(this._settingsMaxOutputTokens, modelMax ?? mc.maxTokens));
   }
 
   // ==================================================================
@@ -1104,7 +1179,6 @@ export class Session {
       SPAWN_AGENT_TOOL, KILL_AGENT_TOOL, CHECK_STATUS_TOOL, WAIT_TOOL,
       SHOW_CONTEXT_TOOL, SUMMARIZE_CONTEXT_TOOL,
       ASK_TOOL, PLAN_TOOL,
-      BASH_BACKGROUND_TOOL, BASH_OUTPUT_TOOL, KILL_SHELL_TOOL,
     ]) {
       if (!existing.has(toolDef.name)) {
         this.primaryAgent.tools.push(toolDef);
@@ -1256,12 +1330,23 @@ export class Session {
    */
   switchModel(modelConfigName: string): void {
     const newModelConfig = this.config.getModel(modelConfigName);
+    this._applyMaxOutputTokensOverride(newModelConfig);
     this.primaryAgent.replaceModelConfig(newModelConfig);
     this._thinkingLevel = this._resolveThinkingLevelForModel(
       newModelConfig.model,
       this._preferredThinkingLevel,
     );
     this._cacheHitEnabled = this._preferredCacheHitEnabled;
+  }
+
+  /**
+   * If settings.json specifies max_output_tokens, clamp the ModelConfig.maxTokens
+   * to [4096, modelMaxOutputTokens]. This mutates the ModelConfig in place.
+   */
+  private _applyMaxOutputTokensOverride(mc: ModelConfig): void {
+    if (this._settingsMaxOutputTokens === undefined) return;
+    const modelMax = getModelMaxOutputTokens(mc.model) ?? mc.maxTokens;
+    (mc as any).maxTokens = Math.max(4096, Math.min(this._settingsMaxOutputTokens, modelMax));
   }
 
   applyGlobalPreferences(preferences: GlobalTuiPreferences): void {
@@ -1366,9 +1451,10 @@ export class Session {
   private _armShowContextAnnotations(): void {
     const mc = this.primaryAgent.modelConfig;
     const provider = (this.primaryAgent as any)._provider;
+    const effectiveMax = this._effectiveMaxTokens(mc);
     const budget = provider.budgetCalcMode === "full_context"
       ? mc.contextLength
-      : mc.contextLength - mc.maxTokens;
+      : mc.contextLength - effectiveMax;
     const result = generateShowContext(this._log, this._lastInputTokens, budget);
     this._showContextRoundsRemaining = 1;
     this._showContextAnnotations = result.annotations;
@@ -2708,8 +2794,9 @@ export class Session {
 
     const mc = this.primaryAgent.modelConfig;
     const provider = (this.primaryAgent as any)._provider;
+    const effectiveMax = this._effectiveMaxTokens(mc);
     const budget = provider.budgetCalcMode === "full_context"
-      ? mc.contextLength : mc.contextLength - mc.maxTokens;
+      ? mc.contextLength : mc.contextLength - effectiveMax;
 
     const result = generateShowContext(this._log, this._lastInputTokens, budget);
     this._showContextRoundsRemaining = 1;
@@ -3330,18 +3417,22 @@ export class Session {
 
     const mc = this.primaryAgent.modelConfig;
     const provider = (this.primaryAgent as any)._provider;
+    const effectiveMax = this._effectiveMaxTokens(mc);
     const budget = provider.budgetCalcMode === "full_context"
       ? mc.contextLength
-      : mc.contextLength - mc.maxTokens;
+      : mc.contextLength - effectiveMax;
 
     if (budget <= 0) return undefined;
+
+    const compactOutputRatio = this._thresholds.compact_output / 100;
+    const compactToolcallRatio = this._thresholds.compact_toolcall / 100;
 
     return (inputTokens: number, outputTokens: number, hasToolCalls: boolean) => {
       const tokensToCheck = provider.budgetCalcMode === "full_context"
         ? inputTokens              // full_context mode: only check input
         : inputTokens + outputTokens;
 
-      const threshold = hasToolCalls ? COMPACT_TOOLCALL_THRESHOLD : COMPACT_OUTPUT_THRESHOLD;
+      const threshold = hasToolCalls ? compactToolcallRatio : compactOutputRatio;
 
       if (tokensToCheck > threshold * budget) {
         return { compactNeeded: true, scenario: hasToolCalls ? "toolcall" : "output" };
@@ -3502,24 +3593,28 @@ export class Session {
 
   /**
    * Check and inject hint compression prompt if thresholds are met.
-   * Two-tier: level 1 at 60%, level 2 at 80%.
+   * Two-tier: level 1 and level 2, configurable via settings.json.
    */
   private _checkAndInjectHint(_result: ToolLoopResult): void {
     if (this._compactInProgress) return;
 
     const mc = this.primaryAgent.modelConfig;
     const provider = (this.primaryAgent as any)._provider;
+    const effectiveMax = this._effectiveMaxTokens(mc);
     const budget = provider.budgetCalcMode === "full_context"
-      ? mc.contextLength : mc.contextLength - mc.maxTokens;
+      ? mc.contextLength : mc.contextLength - effectiveMax;
     if (budget <= 0) return;
 
     const ratio = this._lastInputTokens / budget;
     const pct = `${Math.round(ratio * 100)}%`;
 
-    if (ratio >= HINT_LEVEL2_THRESHOLD && this._hintState !== "level2_sent") {
+    const level2Ratio = this._thresholds.summarize_hint_level2 / 100;
+    const level1Ratio = this._thresholds.summarize_hint_level1 / 100;
+
+    if (ratio >= level2Ratio && this._hintState !== "level2_sent") {
       this._deliverMessage("system", HINT_LEVEL2_PROMPT(pct));
       this._hintState = "level2_sent";
-    } else if (ratio >= HINT_LEVEL1_THRESHOLD && this._hintState === "none") {
+    } else if (ratio >= level1Ratio && this._hintState === "none") {
       this._deliverMessage("system", HINT_LEVEL1_PROMPT(pct));
       this._hintState = "level1_sent";
     }
@@ -3528,19 +3623,21 @@ export class Session {
   /**
    * Update hint state based on actual inputTokens from the latest API call.
    * Implements hysteresis to prevent oscillation.
+   * Reset thresholds are auto-derived from trigger thresholds.
    */
   private _updateHintStateAfterApiCall(): void {
     const mc = this.primaryAgent.modelConfig;
     const provider = (this.primaryAgent as any)._provider;
+    const effectiveMax = this._effectiveMaxTokens(mc);
     const budget = provider.budgetCalcMode === "full_context"
-      ? mc.contextLength : mc.contextLength - mc.maxTokens;
+      ? mc.contextLength : mc.contextLength - effectiveMax;
     if (budget <= 0) return;
 
     const ratio = this._lastInputTokens / budget;
 
-    if (ratio < HINT_RESET_NONE) {
+    if (ratio < this._hintResetNone) {
       this._hintState = "none";
-    } else if (ratio < HINT_RESET_LEVEL1) {
+    } else if (ratio < this._hintResetLevel1) {
       this._hintState = "level1_sent";
     }
     // ratio >= HINT_RESET_LEVEL1: keep current state (don't downgrade)
@@ -4485,7 +4582,7 @@ export class Session {
   }
 
   private _createSubAgentFromPath(templateDir: string, taskId: string): Agent {
-    const templateAgent = loadTemplate(templateDir, this.config, taskId, this._mcpManager);
+    const templateAgent = loadTemplate(templateDir, this.config, taskId, this._mcpManager, this._promptsDir);
     const modelConfig = this._getSubAgentModelConfig();
 
     const agent = new Agent({
@@ -4942,18 +5039,22 @@ export class Session {
   private _buildSubAgentCompactCheck(agent: Agent) {
     const mc = agent.modelConfig;
     const provider = (agent as any)._provider;
+    const effectiveMax = this._effectiveMaxTokens(mc);
     const budget = provider.budgetCalcMode === "full_context"
       ? mc.contextLength
-      : mc.contextLength - mc.maxTokens;
+      : mc.contextLength - effectiveMax;
 
     if (budget <= 0) return undefined;
+
+    const compactOutputRatio = this._thresholds.compact_output / 100;
+    const compactToolcallRatio = this._thresholds.compact_toolcall / 100;
 
     return (inputTokens: number, outputTokens: number, hasToolCalls: boolean) => {
       const tokensToCheck = provider.budgetCalcMode === "full_context"
         ? inputTokens
         : inputTokens + outputTokens;
 
-      const threshold = hasToolCalls ? COMPACT_TOOLCALL_THRESHOLD : COMPACT_OUTPUT_THRESHOLD;
+      const threshold = hasToolCalls ? compactToolcallRatio : compactOutputRatio;
 
       if (tokensToCheck > threshold * budget) {
         return { compactNeeded: true, scenario: hasToolCalls ? "toolcall" as const : "output" as const };
@@ -4976,7 +5077,7 @@ export class Session {
     onToolCall?: ((agentName: string, tool: string, args: Record<string, unknown>, summary: string) => void),
     signal?: AbortSignal,
   ): Promise<string> {
-    const prompt = scenario === "output" ? COMPACT_PROMPT_OUTPUT : COMPACT_PROMPT_TOOLCALL;
+    const prompt = scenario === "output" ? SUB_AGENT_COMPACT_PROMPT_OUTPUT : SUB_AGENT_COMPACT_PROMPT_TOOLCALL;
     runtime.appendEntry(createUserMessageEntry(
       runtime.allocId("user_message"),
       0,
@@ -5383,7 +5484,7 @@ export class Session {
   private _generateSummary(): string {
     for (const entry of this._log) {
       if (entry.type !== "user_message") continue;
-      if (entry.summarized || entry.discarded) continue;
+      if (entry.discarded) continue;
       const display = entry.display;
       if (!display) continue;
       if (SYSTEM_PREFIXES.some((prefix) => display.startsWith(prefix))) continue;

@@ -59,16 +59,22 @@ export interface PathsConfig {
 
 export const KNOWN_CONTEXT_LENGTHS: Record<string, number> = {
   // OpenAI - GPT-5 family
-  "gpt-5": 272_000,
-  "gpt-5.1": 272_000,
-  "gpt-5.2": 272_000,
+  "gpt-5.2": 400_000,
+  "gpt-5.2-codex": 400_000,
+  "gpt-5.3-codex": 400_000,
+  "gpt-5.4": 1_050_000,
   // Anthropic
   "claude-opus-4-1-20250805": 200_000,
   "claude-sonnet-4-5-20250929": 200_000,
   "claude-haiku-4-5-20251001": 200_000,
+  "claude-haiku-4-5": 200_000,
   "claude-opus-4-5-20251101": 200_000,
   "claude-opus-4-6": 200_000,
   "claude-sonnet-4-6": 200_000,
+  // OpenRouter Anthropic aliases
+  "claude-haiku-4.5": 200_000,
+  "claude-opus-4.6": 200_000,
+  "claude-sonnet-4.6": 200_000,
   // Kimi
   "kimi-k2.5": 256_000,
   "kimi-k2-thinking": 256_000,
@@ -78,14 +84,12 @@ export const KNOWN_CONTEXT_LENGTHS: Record<string, number> = {
   "glm-4.7": 200_000,
   "glm-4.7-flash": 200_000,
   // MiniMax
-  "MiniMax-M2": 128_000,
   "MiniMax-M2.1": 200_000,
   "MiniMax-M2.5": 204_800,
   "MiniMax-M2.5-highspeed": 204_800,
   "MiniMax-M1-40k": 1_000_000,
   "MiniMax-M1-80k": 1_000_000,
   // MiniMax — lowercase aliases for OpenRouter (minimax/minimax-m2.5 → minimax-m2.5)
-  "minimax-m2": 128_000,
   "minimax-m2.1": 200_000,
   "minimax-m2.5": 204_800,
   "minimax-m1": 1_000_000,
@@ -93,31 +97,35 @@ export const KNOWN_CONTEXT_LENGTHS: Record<string, number> = {
 
 export const KNOWN_MULTIMODAL_MODELS: Set<string> = new Set([
   // OpenAI
-  "gpt-5", "gpt-5.1", "gpt-5.2",
+  "gpt-5.2", "gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.4",
   // Anthropic
   "claude-opus-4-1-20250805", "claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001",
+  "claude-haiku-4-5",
   "claude-opus-4-5-20251101", "claude-opus-4-6", "claude-sonnet-4-6",
+  "claude-haiku-4.5", "claude-opus-4.6", "claude-sonnet-4.6",
   // Kimi
   "kimi-k2.5",
   // MiniMax
-  "MiniMax-M2", "minimax-m2",
+  "MiniMax-M2.1", "minimax-m2.1",
 ]);
 
 export const KNOWN_THINKING_MODELS: Set<string> = new Set([
   // OpenAI
-  "gpt-5", "gpt-5.1", "gpt-5.2",
+  "gpt-5.2", "gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.4",
   // Anthropic
   "claude-opus-4-1-20250805", "claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001",
+  "claude-haiku-4-5",
   "claude-opus-4-5-20251101", "claude-opus-4-6", "claude-sonnet-4-6",
+  "claude-haiku-4.5", "claude-opus-4.6", "claude-sonnet-4.6",
   // Kimi
   "kimi-k2.5", "kimi-k2-thinking",
   // GLM
   "glm-5", "glm-4.7", "glm-4.7-flash",
   // MiniMax
-  "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2",
+  "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1",
   "MiniMax-M1-40k", "MiniMax-M1-80k",
   // MiniMax — lowercase aliases for OpenRouter
-  "minimax-m2.5", "minimax-m2", "minimax-m1",
+  "minimax-m2.5", "minimax-m2.1", "minimax-m1",
 ]);
 
 export const KNOWN_NO_WEB_SEARCH_MODELS: Set<string> = new Set([
@@ -126,21 +134,76 @@ export const KNOWN_NO_WEB_SEARCH_MODELS: Set<string> = new Set([
 ]);
 
 // ------------------------------------------------------------------
+// Max output tokens per model
+// ------------------------------------------------------------------
+
+export const KNOWN_MAX_OUTPUT_TOKENS: Record<string, number> = {
+  // OpenAI — GPT-5 family
+  "gpt-5.2": 128_000,
+  "gpt-5.2-codex": 128_000,
+  "gpt-5.3-codex": 128_000,
+  "gpt-5.4": 128_000,
+  // Anthropic — Claude 4.6
+  "claude-opus-4-6": 128_000,
+  "claude-sonnet-4-6": 64_000,
+  // Anthropic — Claude 4.5
+  "claude-opus-4-5-20251101": 64_000,
+  "claude-sonnet-4-5-20250929": 64_000,
+  "claude-haiku-4-5-20251001": 64_000,
+  "claude-haiku-4-5": 64_000,
+  // Anthropic — Claude 4.1
+  "claude-opus-4-1-20250805": 32_000,
+  // OpenRouter — Anthropic aliases
+  "claude-haiku-4.5": 64_000,
+  "claude-opus-4.6": 128_000,
+  "claude-sonnet-4.6": 64_000,
+  // Kimi
+  "kimi-k2.5": 65_536,
+  "kimi-k2-thinking": 65_536,
+  "kimi-k2-instruct": 65_536,
+  // GLM (Zhipu AI)
+  "glm-5": 128_000,
+  "glm-4.7": 128_000,
+  "glm-4.7-flash": 128_000,
+  // MiniMax
+  "MiniMax-M2.1": 8_192,
+  "MiniMax-M2.5": 196_608,
+  "MiniMax-M2.5-highspeed": 196_608,
+  "MiniMax-M1-40k": 40_000,
+  "MiniMax-M1-80k": 80_000,
+  // MiniMax — lowercase aliases for OpenRouter
+  "minimax-m2.1": 8_192,
+  "minimax-m2.5": 196_608,
+  "minimax-m1": 80_000,
+};
+
+/** Resolve max output tokens for a model. Priority: known lookup (exact then normalized) > undefined. */
+export function getModelMaxOutputTokens(model: string): number | undefined {
+  return KNOWN_MAX_OUTPUT_TOKENS[model]
+    ?? KNOWN_MAX_OUTPUT_TOKENS[normalizeModelId(model)];
+}
+
+// ------------------------------------------------------------------
 // Thinking levels per model
 // ------------------------------------------------------------------
 
 export const KNOWN_THINKING_LEVELS: Record<string, string[]> = {
   // OpenAI
-  "gpt-5":     ["off", "minimal", "low", "medium", "high"],
-  "gpt-5.1":   ["off", "minimal", "low", "medium", "high"],
-  "gpt-5.2":   ["off", "minimal", "low", "medium", "high", "xhigh"],
+  "gpt-5.2":   ["none", "low", "medium", "high", "xhigh"],
+  "gpt-5.2-codex": ["low", "medium", "high", "xhigh"],
+  "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4":   ["none", "low", "medium", "high", "xhigh"],
   // Anthropic — adaptive + effort (4.6)
   "claude-opus-4-6":   ["off", "low", "medium", "high", "max"],
   "claude-sonnet-4-6": ["off", "low", "medium", "high", "max"],
+  "claude-opus-4.6":   ["off", "low", "medium", "high", "max"],
+  "claude-sonnet-4.6": ["off", "low", "medium", "high", "max"],
   // Anthropic — manual extended thinking (4.5 and earlier)
   "claude-opus-4-1-20250805":   ["off", "low", "medium", "high"],
   "claude-sonnet-4-5-20250929": ["off", "low", "medium", "high"],
   "claude-haiku-4-5-20251001":  ["off", "low", "medium", "high"],
+  "claude-haiku-4-5": ["off", "low", "medium", "high"],
+  "claude-haiku-4.5": ["off", "low", "medium", "high"],
   "claude-opus-4-5-20251101":   ["off", "low", "medium", "high"],
   // GLM
   "glm-5": ["off", "on"], "glm-4.7": ["off", "on"], "glm-4.7-flash": ["off", "on"],
@@ -148,9 +211,9 @@ export const KNOWN_THINKING_LEVELS: Record<string, string[]> = {
   "kimi-k2.5": ["off", "on"], "kimi-k2-thinking": ["off", "on"],
   // MiniMax (not configurable)
   "MiniMax-M2.5": ["on"], "MiniMax-M2.5-highspeed": ["on"],
-  "MiniMax-M2": ["on"], "MiniMax-M1-40k": ["on"], "MiniMax-M1-80k": ["on"],
+  "MiniMax-M2.1": ["on"], "MiniMax-M1-40k": ["on"], "MiniMax-M1-80k": ["on"],
   // MiniMax — lowercase aliases for OpenRouter
-  "minimax-m2.5": ["on"], "minimax-m2": ["on"], "minimax-m1": ["on"],
+  "minimax-m2.5": ["on"], "minimax-m2.1": ["on"], "minimax-m1": ["on"],
 };
 
 /** Return available thinking levels for a model, or empty array if not a thinking model. */
@@ -332,6 +395,7 @@ export const LONGERAGENT_HOME_DIR = ".longeragent";
 export interface ResolvedPaths {
   configPath: string | null;      // null = not found → trigger wizard
   templatesPath: string | null;
+  promptsPath: string | null;
   skillsPath: string | null;
   homeDir: string;                // ~/.longeragent/
 }
@@ -378,6 +442,25 @@ export function resolveConfigPaths(opts?: {
     }
   }
 
+  // --- Prompts ---
+  let promptsPath: string | null = null;
+  if (templatesPath) {
+    // Look for prompts/ sibling to templates directory
+    const siblingPrompts = join(join(templatesPath, ".."), "prompts");
+    if (isDir(siblingPrompts)) {
+      promptsPath = siblingPrompts;
+    }
+  }
+  if (!promptsPath) {
+    const homePrompts = join(home, "prompts");
+    const cwdPrompts = join(process.cwd(), "prompts");
+    if (isDir(homePrompts)) {
+      promptsPath = homePrompts;
+    } else if (isDir(cwdPrompts)) {
+      promptsPath = cwdPrompts;
+    }
+  }
+
   // --- Skills ---
   let skillsPath: string | null = null;
   if (templatesPath) {
@@ -397,7 +480,7 @@ export function resolveConfigPaths(opts?: {
     }
   }
 
-  return { configPath, templatesPath, skillsPath, homeDir: home };
+  return { configPath, templatesPath, promptsPath, skillsPath, homeDir: home };
 }
 
 function isDir(p: string): boolean {

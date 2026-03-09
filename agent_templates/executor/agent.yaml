@@ -1,0 +1,22 @@
+type: agent
+name: executor
+description: "Executes bounded tasks with file and shell access."
+system_prompt_file: system_prompt.md
+tools:
+  - read_file
+  - write_file
+  - edit_file
+  - apply_patch
+  - list_dir
+  - glob
+  - grep
+  - diff
+  - bash
+  - bash_background
+  - bash_output
+  - kill_shell
+  - test
+  - web_search
+  - web_fetch
+prompt_sections: [important_log]
+max_tool_rounds: 200

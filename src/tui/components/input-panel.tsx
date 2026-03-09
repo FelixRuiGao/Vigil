@@ -42,6 +42,7 @@ import {
   exitCommandPickerLevel,
   getCommandPickerLevel,
   getCommandPickerPath,
+  getCommandPickerVisibleRange,
   isCommandPickerActive,
   moveCommandPickerSelection,
   type CommandPickerState,
@@ -73,6 +74,7 @@ const ANSI_INVERSE_OFF = "\u001B[27m";
 const PROMPT = "❯ ";
 const PROMPT_INDENT = " ".repeat(PROMPT.length);
 const INPUT_VIEWPORT_MAX_LINES = 100;
+const RESUME_PICKER_MAX_VISIBLE = 10;
 
 function inverse(text: string): string {
   return `${ANSI_INVERSE_ON}${text}${ANSI_INVERSE_OFF}`;
@@ -186,6 +188,8 @@ function CommandPickerView({ picker }: { picker: CommandPickerState }): React.Re
   if (!isCommandPickerActive(picker)) return null;
   const level = getCommandPickerLevel(picker);
   const path = getCommandPickerPath(picker);
+  const { start, end } = getCommandPickerVisibleRange(picker);
+  const visibleOptions = level.options.slice(start, end);
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -196,16 +200,19 @@ function CommandPickerView({ picker }: { picker: CommandPickerState }): React.Re
           {path.join(" · ")}
         </Text>
       ) : null}
-      {level.options.map((item, i) => (
-        <Text
-          key={`picker-${i}`}
-          color={i === level.selected ? theme.accent : "gray"}
-          bold={i === level.selected}
-        >
-          {i === level.selected ? " > " : "   "}
-          {item.label}
-        </Text>
-      ))}
+      {visibleOptions.map((item, i) => {
+        const actualIndex = start + i;
+        return (
+          <Text
+            key={`picker-${actualIndex}`}
+            color={actualIndex === level.selected ? theme.accent : "gray"}
+            bold={actualIndex === level.selected}
+          >
+            {actualIndex === level.selected ? " > " : "   "}
+            {item.label}
+          </Text>
+        );
+      })}
     </Box>
   );
 }
@@ -280,7 +287,13 @@ export const InputPanel = React.forwardRef<InputPanelHandle, InputPanelProps>(
         const options = buildCommandOptions(cmdName);
         if (options.length === 0) return false;
         hideOverlay();
-        setPicker(createCommandPicker(cmdName, options));
+        setPicker(
+          createCommandPicker(
+            cmdName,
+            options,
+            cmdName === "/resume" ? RESUME_PICKER_MAX_VISIBLE : options.length,
+          ),
+        );
         return true;
       },
       [buildCommandOptions, hideOverlay],

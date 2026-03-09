@@ -23,7 +23,7 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { Box, useApp, useStdin } from "ink";
+import { Box, Text, useApp, useStdin } from "ink";
 import { execSync } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { LogoPanel } from "./components/logo-panel.js";
@@ -1161,7 +1161,14 @@ export function App({
 
   return (
     <Box flexDirection="column" height="100%">
-      <LogoPanel cwd={process.cwd()} />
+      {/* Two one-line buffers absorb terminal resize artifacts before they reach the logo. */}
+      <Box flexShrink={0}>
+        <Text>{" "}</Text>
+      </Box>
+      <Box flexDirection="column" flexShrink={0}>
+        <Text>{" "}</Text>
+        <LogoPanel cwd={process.cwd()} />
+      </Box>
       <ConversationPanel
         entries={entries}
         markdownMode={markdownMode}

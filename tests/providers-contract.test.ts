@@ -8,12 +8,12 @@ function modelConfig(overrides: Partial<ModelConfig>): ModelConfig {
   return {
     name: "test",
     provider: "openai",
-    model: "gpt-5",
+    model: "gpt-5.2",
     apiKey: "test-key",
     baseUrl: undefined,
     temperature: 0.7,
     maxTokens: 1024,
-    contextLength: 272_000,
+    contextLength: 400_000,
     supportsMultimodal: true,
     supportsThinking: true,
     thinkingBudget: 0,
@@ -101,7 +101,7 @@ describe("provider response contract (streaming vs non-streaming)", () => {
   });
 
   it("OpenAI Responses preserves reasoning/citations when response.completed is available", async () => {
-    const provider = new OpenAIResponsesProvider(modelConfig({ model: "gpt-5" }));
+    const provider = new OpenAIResponsesProvider(modelConfig({ model: "gpt-5.2" }));
 
     const finalResponse = {
       output: [
@@ -162,7 +162,7 @@ describe("provider response contract (streaming vs non-streaming)", () => {
   });
 
   it("OpenAI Responses stream fallback still returns reasoningState when final response is absent", async () => {
-    const provider = new OpenAIResponsesProvider(modelConfig({ model: "gpt-5" }));
+    const provider = new OpenAIResponsesProvider(modelConfig({ model: "gpt-5.2" }));
 
     (provider as any)._client = {
       responses: {

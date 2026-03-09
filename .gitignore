@@ -12,3 +12,5 @@ config.local.yaml
 .claude/
 .longeragent-artifacts/
 .agentflow-artifacts/
+Docs/
+.archive/

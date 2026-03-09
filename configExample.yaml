@@ -13,7 +13,7 @@ models:
   # ── Anthropic ──────────────────────────────────────────────────────
   my-claude:
     provider: anthropic
-    model: claude-sonnet-4-6          # or: claude-opus-4-6
+    model: claude-sonnet-4-6          # or: claude-opus-4-6, claude-haiku-4-5
     api_key: ${ANTHROPIC_API_KEY}
     # temperature: 0.7                # default: 0.7
     # max_tokens: 32000               # default: 32000
@@ -22,16 +22,13 @@ models:
   # ── OpenAI ─────────────────────────────────────────────────────────
   # my-openai:
   #   provider: openai                # uses Chat Completions API
-  #   model: gpt-5                    # or: gpt-5.1, gpt-4o, gpt-4o-mini
+  #   model: gpt-5.2                  # or: gpt-5.2-codex, gpt-5.3-codex, gpt-5.4
   #   api_key: ${OPENAI_API_KEY}
 
   # my-openai-responses:
   #   provider: openai-responses      # uses Responses API (web search, reasoning)
-  #   model: gpt-5
+  #   model: gpt-5.2                  # or: gpt-5.2-codex, gpt-5.3-codex, gpt-5.4
   #   api_key: ${OPENAI_API_KEY}
-
-  # NOTE: Direct Gemini / DeepSeek providers have been removed from
-  # the runtime. Use OpenRouter if you need those model families.
 
   # ── Kimi (Moonshot) ────────────────────────────────────────────────
   # my-kimi:
@@ -42,7 +39,7 @@ models:
   # ── MiniMax ────────────────────────────────────────────────────────
   # my-minimax:
   #   provider: minimax
-  #   model: MiniMax-M2.5             # or: MiniMax-M2, MiniMax-M1-80k
+  #   model: MiniMax-M2.5             # or: MiniMax-M2.1, MiniMax-M1-80k
   #   api_key: ${MINIMAX_API_KEY}
 
   # ── GLM (Zhipu) ───────────────────────────────────────────────────
@@ -54,7 +51,7 @@ models:
   # ── OpenRouter ─────────────────────────────────────────────────────
   # my-openrouter:
   #   provider: openrouter
-  #   model: anthropic/claude-sonnet-4-6  # any OpenRouter model ID
+  #   model: anthropic/claude-sonnet-4.6  # or: anthropic/claude-haiku-4.5, openai/gpt-5.2-codex, openai/gpt-5.3-codex, minimax/minimax-m2.1
   #   api_key: ${OPENROUTER_API_KEY}
   #   http_referer: https://myapp.example.com  # optional
   #   x_title: MyApp                            # optional

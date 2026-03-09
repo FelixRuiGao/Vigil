@@ -22,6 +22,7 @@ import { Session } from "./session.js";
 import { loadTemplates } from "./templates/loader.js";
 import { loadSkills } from "./skills/loader.js";
 import { SessionStore } from "./persistence.js";
+import { loadSettingsFile, resolveSettings } from "./settings.js";
 import {
   buildDefaultRegistry,
   registerSkillCommands,
@@ -148,6 +149,15 @@ async function main(): Promise<void> {
   // Load config
   const config = new Config({ path: configPath });
 
+  // Load user settings (~/.longeragent/settings.json)
+  const rawSettings = loadSettingsFile(paths.homeDir);
+  const settings = resolveSettings(rawSettings);
+
+  // Display settings warnings (invalid thresholds, clamped values, etc.)
+  for (const warning of settings.warnings) {
+    console.warn(`Warning: ${warning}`);
+  }
+
   // Initialise MCP client manager (if mcp_servers configured)
   let mcpManager: unknown = null;
   if (config.mcpServerConfigs.length > 0) {
@@ -163,11 +173,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // Load agent templates
+  // Load agent templates (with prompt assembly from prompts/ directory)
+  const promptsPath = paths.promptsPath;
   const agents = loadTemplates(
     templatesPath,
     config,
     mcpManager as any,
+    promptsPath ?? undefined,
   );
   const primary = identifyPrimaryAgent(agents);
 
@@ -200,7 +212,9 @@ async function main(): Promise<void> {
     skills: skills as never,
     progress: undefined,
     mcpManager: mcpManager as never,
+    promptsDir: promptsPath ?? undefined,
     store: store as never,
+    settings,
   });
 
   const globalPreferences = store.loadGlobalPreferences();

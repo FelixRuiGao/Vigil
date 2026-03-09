@@ -50,10 +50,17 @@ describe("/model command", () => {
     expect(anthropic).toBeTruthy();
     expect(kimiGlobal).toBeTruthy();
     expect(openai).toBeTruthy();
+    expect(anthropic!.children?.some((c) => c.label.includes("claude-haiku-4-5"))).toBe(true);
     expect(anthropic!.children?.some((c) => c.label.includes("claude-sonnet-4-6  (current)"))).toBe(true);
+    expect(anthropic!.children?.some((c) => c.label.includes("claude-sonnet-4-6  (1M context beta)"))).toBe(true);
     expect(
-      openai!.children?.some((c) => c.label.includes("gpt-5  (key missing: run longeragent init)")),
+      openai!.children?.some((c) => c.label.includes("gpt-5.2  (key missing: run longeragent init)")),
     ).toBe(true);
+    expect(openai!.children?.some((c) => c.label.includes("gpt-5.1"))).toBe(false);
+    expect(openai!.children?.some((c) => c.label.includes("gpt-4o"))).toBe(false);
+    expect(openai!.children?.some((c) => c.label.includes("gpt-5.4"))).toBe(true);
+    expect(openai!.children?.some((c) => c.label.includes("gpt-5.2-codex"))).toBe(true);
+    expect(openai!.children?.some((c) => c.label.includes("gpt-5.3-codex"))).toBe(true);
   });
 
   it("normalizes OpenRouter child labels for display without vendor prefixes", () => {
@@ -78,7 +85,12 @@ describe("/model command", () => {
     const opts = cmd!.options!({ session });
     const openrouter = opts.find((o) => o.value === "openrouter");
     expect(openrouter).toBeTruthy();
+    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/claude-haiku-4.5"))).toBe(true);
     expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/kimi-k2.5"))).toBe(true);
+    expect(openrouter!.children?.some((c) => c.label.includes("openrouter/claude-sonnet-4.6  (1M context)"))).toBe(true);
+    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/minimax-m2.1"))).toBe(true);
+    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/gpt-5.4"))).toBe(true);
+    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/gpt-5.3-codex"))).toBe(true);
   });
 
   it("blocks switching to provider:model when provider API key is missing", async () => {
@@ -112,7 +124,7 @@ describe("/model command", () => {
     };
 
     const ctx = makeContext(registry, session);
-    await cmd!.handler(ctx, "openai:gpt-5");
+    await cmd!.handler(ctx, "openai:gpt-5.4");
 
     const rendered = (ctx.showMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(rendered).toContain("Missing API key for provider 'openai'");
@@ -138,8 +150,8 @@ describe("/model command", () => {
         (session.primaryAgent as any).modelConfig = {
           name,
           provider: "openai",
-          model: "gpt-5",
-          contextLength: 272000,
+          model: "gpt-5.2-codex",
+          contextLength: 400000,
           apiKey: "sk-inline",
         };
       },
@@ -156,20 +168,73 @@ describe("/model command", () => {
     };
 
     const ctx = makeContext(registry, session);
-    await cmd!.handler(ctx, "openai:gpt-5 key=sk-inline");
+    await cmd!.handler(ctx, "openai:gpt-5.2-codex key=sk-inline");
 
     expect(upsertModelRaw).toHaveBeenCalledWith(
-      "runtime-openai-gpt-5",
+      "runtime-openai-gpt-5-2-codex",
       expect.objectContaining({
         provider: "openai",
-        model: "gpt-5",
+        model: "gpt-5.2-codex",
         api_key: "sk-inline",
       }),
     );
-    expect(switchModel).toHaveBeenCalledWith("runtime-openai-gpt-5");
+    expect(switchModel).toHaveBeenCalledWith("runtime-openai-gpt-5-2-codex");
     expect(resetForNewSession).toHaveBeenCalledTimes(1);
     expect(ctx.resetUiState as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
     expect(ctx.autoSave as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves preset-specific overrides for Anthropic 1M variants", async () => {
+    const registry = buildDefaultRegistry();
+    const cmd = registry.lookup("/model");
+    expect(cmd).toBeTruthy();
+
+    const upsertModelRaw = vi.fn();
+    const switchModel = vi.fn();
+    const resetForNewSession = vi.fn();
+    const session = {
+      config: {
+        modelNames: [],
+        listModelEntries: () => [],
+        upsertModelRaw,
+      },
+      switchModel: (name: string) => {
+        switchModel(name);
+        (session.primaryAgent as any).modelConfig = {
+          name,
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          contextLength: 1_000_000,
+          apiKey: "sk-inline",
+        };
+      },
+      resetForNewSession,
+      primaryAgent: {
+        modelConfig: {
+          name: "my-openai",
+          provider: "openai",
+          model: "gpt-5.2",
+          contextLength: 400000,
+          apiKey: "sk-openai",
+        },
+      },
+    };
+
+    const ctx = makeContext(registry, session);
+    await cmd!.handler(ctx, "anthropic:claude-sonnet-4-6-1m key=sk-inline");
+
+    expect(upsertModelRaw).toHaveBeenCalledWith(
+      "runtime-anthropic-claude-sonnet-4-6-1m",
+      expect.objectContaining({
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        api_key: "sk-inline",
+        context_length: 1_000_000,
+        betas: ["context-1m-2025-08-07"],
+      }),
+    );
+    expect(switchModel).toHaveBeenCalledWith("runtime-anthropic-claude-sonnet-4-6-1m");
+    expect(resetForNewSession).toHaveBeenCalledTimes(1);
   });
 
   it("reuses provider key from existing model when switching to another model in same provider", async () => {
@@ -187,7 +252,7 @@ describe("/model command", () => {
           {
             name: "my-openai",
             provider: "openai",
-            model: "gpt-4o",
+            model: "gpt-5.2",
             apiKeyRaw: "${OPENAI_API_KEY}",
             hasResolvedApiKey: true,
           },
@@ -199,8 +264,8 @@ describe("/model command", () => {
         (session.primaryAgent as any).modelConfig = {
           name,
           provider: "openai",
-          model: "gpt-5",
-          contextLength: 272000,
+          model: "gpt-5.2-codex",
+          contextLength: 400000,
           apiKey: "sk-openai",
         };
       },
@@ -209,25 +274,77 @@ describe("/model command", () => {
         modelConfig: {
           name: "my-openai",
           provider: "openai",
-          model: "gpt-4o",
-          contextLength: 128000,
+          model: "gpt-5.2",
+          contextLength: 400000,
           apiKey: "sk-openai",
         },
       },
     };
 
     const ctx = makeContext(registry, session);
-    await cmd!.handler(ctx, "openai:gpt-5");
+    await cmd!.handler(ctx, "openai:gpt-5.2-codex");
 
     expect(upsertModelRaw).toHaveBeenCalledWith(
-      "runtime-openai-gpt-5",
+      "runtime-openai-gpt-5-2-codex",
       expect.objectContaining({
         provider: "openai",
-        model: "gpt-5",
+        model: "gpt-5.2-codex",
         api_key: "${OPENAI_API_KEY}",
       }),
     );
-    expect(switchModel).toHaveBeenCalledWith("runtime-openai-gpt-5");
+    expect(switchModel).toHaveBeenCalledWith("runtime-openai-gpt-5-2-codex");
+    expect(resetForNewSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps OpenRouter Anthropic aliases to the official 1M preset config", async () => {
+    const registry = buildDefaultRegistry();
+    const cmd = registry.lookup("/model");
+    expect(cmd).toBeTruthy();
+
+    const upsertModelRaw = vi.fn();
+    const switchModel = vi.fn();
+    const resetForNewSession = vi.fn();
+    const session = {
+      config: {
+        modelNames: [],
+        listModelEntries: () => [],
+        upsertModelRaw,
+      },
+      switchModel: (name: string) => {
+        switchModel(name);
+        (session.primaryAgent as any).modelConfig = {
+          name,
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.6",
+          contextLength: 1_000_000,
+          apiKey: "sk-inline",
+        };
+      },
+      resetForNewSession,
+      primaryAgent: {
+        modelConfig: {
+          name: "my-openai",
+          provider: "openai",
+          model: "gpt-5.2",
+          contextLength: 400000,
+          apiKey: "sk-openai",
+        },
+      },
+    };
+
+    const ctx = makeContext(registry, session);
+    await cmd!.handler(ctx, "openrouter:anthropic/claude-sonnet-4-6 key=sk-inline");
+
+    expect(upsertModelRaw).toHaveBeenCalledWith(
+      "runtime-openrouter-anthropic-claude-sonnet-4-6",
+      expect.objectContaining({
+        provider: "openrouter",
+        model: "anthropic/claude-sonnet-4.6",
+        api_key: "sk-inline",
+        context_length: 1_000_000,
+      }),
+    );
+    expect(switchModel).toHaveBeenCalledWith("runtime-openrouter-anthropic-claude-sonnet-4-6");
     expect(resetForNewSession).toHaveBeenCalledTimes(1);
   });
 });

@@ -58,6 +58,29 @@ describe("resume command", () => {
     expect(options[0]?.label).toContain("hello");
   });
 
+  it("truncates /resume summaries to 25 characters in picker labels", () => {
+    const registry = buildDefaultRegistry();
+    const resume = registry.lookup("/resume");
+    expect(resume?.options).toBeTruthy();
+
+    const options = resume!.options!({
+      session: {},
+      store: {
+        listSessions: vi.fn(() => [
+          {
+            path: "/tmp/s1",
+            created: "2026-02-21T08:00:00.000-08:00",
+            summary: "123456789012345678901234567890",
+            turns: 1,
+          },
+        ]),
+      } as unknown as CommandContext["store"],
+    });
+
+    expect(options[0]?.label).toContain("1234567890123456789012345");
+    expect(options[0]?.label).not.toContain("12345678901234567890123456");
+  });
+
   it("restores from log.json and rebuilds conversation", async () => {
     const registry = buildDefaultRegistry();
     const resume = registry.lookup("/resume");
@@ -112,7 +135,7 @@ describe("resume command", () => {
     expect(store.sessionDir).toBe(sessionDir);
     expect(setStore).toHaveBeenCalled();
 
-    expect(showMessage).toHaveBeenCalledWith("--- Session restored ---");
+    expect(showMessage).not.toHaveBeenCalledWith("--- Session restored ---");
 
     rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -164,7 +187,7 @@ describe("resume command", () => {
           {
             path: "/tmp/s1",
             created: "2026-02-21T08:00:00.000-08:00",
-            summary: "hello",
+            summary: "123456789012345678901234567890",
             turns: 1,
           },
         ]),
@@ -179,5 +202,7 @@ describe("resume command", () => {
     const output = showMessage.mock.calls[0][0] as string;
     expect(output).toContain("2026-02-21 08:00:00");
     expect(output).not.toContain("Z");
+    expect(output).toContain("1234567890123456789012345");
+    expect(output).not.toContain("12345678901234567890123456");
   });
 });

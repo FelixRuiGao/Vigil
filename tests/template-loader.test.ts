@@ -18,7 +18,7 @@ function makeConfig(): Config {
       models: {
         "test-model": {
           provider: "openai",
-          model: "gpt-5",
+          model: "gpt-5.2",
           api_key: "dummy-key",
         },
       },

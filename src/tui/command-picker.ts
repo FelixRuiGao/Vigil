@@ -4,10 +4,12 @@ export interface CommandPickerLevel {
   label: string;
   options: CommandOption[];
   selected: number;
+  visibleStart: number;
 }
 
 export interface CommandPickerState {
   commandName: string;
+  maxVisible: number;
   stack: CommandPickerLevel[];
 }
 
@@ -22,13 +24,24 @@ function clampSelection(selected: number, options: CommandOption[]): number {
   return selected;
 }
 
+function clampVisibleStart(
+  start: number,
+  optionCount: number,
+  maxVisible: number,
+): number {
+  if (optionCount <= maxVisible) return 0;
+  return Math.max(0, Math.min(start, optionCount - maxVisible));
+}
+
 export function createCommandPicker(
   commandName: string,
   options: CommandOption[],
+  maxVisible = options.length,
 ): CommandPickerState {
   return {
     commandName,
-    stack: [{ label: commandName, options, selected: 0 }],
+    maxVisible,
+    stack: [{ label: commandName, options, selected: 0, visibleStart: 0 }],
   };
 }
 
@@ -46,19 +59,59 @@ export function getCommandPickerPath(picker: CommandPickerState): string[] {
   return picker.stack.slice(1).map((level) => level.label);
 }
 
+export function getCommandPickerVisibleRange(
+  picker: CommandPickerState,
+): { start: number; end: number } {
+  const level = getCommandPickerLevel(picker);
+  const maxVisible = Math.max(1, picker.maxVisible);
+  let start = clampVisibleStart(level.visibleStart, level.options.length, maxVisible);
+  if (level.options.length <= maxVisible) {
+    return { start: 0, end: level.options.length };
+  }
+
+  if (level.selected < start) {
+    start = level.selected;
+  } else if (level.selected >= start + maxVisible) {
+    start = level.selected - maxVisible + 1;
+  }
+
+  start = clampVisibleStart(start, level.options.length, maxVisible);
+  return { start, end: start + maxVisible };
+}
+
 export function moveCommandPickerSelection(
   picker: CommandPickerState,
   delta: number,
 ): CommandPickerState {
   const level = getCommandPickerLevel(picker);
   const count = level.options.length;
-  if (count === 0) return picker;
-  const nextSelected = (level.selected + delta + count) % count;
+  if (count === 0 || delta === 0) return picker;
+
+  const maxVisible = Math.max(1, picker.maxVisible);
+  let nextSelected = level.selected;
+  let nextVisibleStart = clampVisibleStart(level.visibleStart, count, maxVisible);
+  const direction = delta > 0 ? 1 : -1;
+
+  for (let step = 0; step < Math.abs(delta); step += 1) {
+    nextSelected = (nextSelected + direction + count) % count;
+
+    if (count <= maxVisible) {
+      nextVisibleStart = 0;
+      continue;
+    }
+    if (nextSelected < nextVisibleStart) {
+      nextVisibleStart = nextSelected;
+    } else if (nextSelected >= nextVisibleStart + maxVisible) {
+      nextVisibleStart = nextSelected - maxVisible + 1;
+    }
+    nextVisibleStart = clampVisibleStart(nextVisibleStart, count, maxVisible);
+  }
+
   return {
     ...picker,
     stack: [
       ...picker.stack.slice(0, -1),
-      { ...level, selected: nextSelected },
+      { ...level, selected: nextSelected, visibleStart: nextVisibleStart },
     ],
   };
 }
@@ -89,6 +142,7 @@ export function acceptCommandPickerSelection(
             label: option.label,
             options: option.children,
             selected: 0,
+            visibleStart: 0,
           },
         ],
       },

@@ -19,7 +19,12 @@ import {
   formatScopedModelName,
   getThinkingLevels,
 } from "./config.js";
-import { PROVIDER_PRESETS } from "./provider-presets.js";
+import {
+  PROVIDER_PRESETS,
+  buildProviderPresetRawConfig,
+  findProviderPresetModel,
+  type ProviderPresetModel,
+} from "./provider-presets.js";
 import { resolveSkillContent, type SkillMeta } from "./skills/loader.js";
 import { ACCENT_PRESETS, DEFAULT_ACCENT, setAccent, theme } from "./tui/theme.js";
 
@@ -238,7 +243,7 @@ async function cmdResume(ctx: CommandContext, args: string): Promise<void> {
       const created = s.created
         ? s.created.slice(0, 19).replace("T", " ")
         : "?";
-      const summary = (s.summary || "(empty)").slice(0, 60);
+      const summary = truncateDisplayText(s.summary || "(empty)", 25);
       lines.push(`  ${i + 1}  ${created}  ${s.turns}t  ${summary}`);
     }
     lines.push("");
@@ -305,8 +310,6 @@ async function cmdResume(ctx: CommandContext, args: string): Promise<void> {
   if (typeof session.setStore === "function") {
     session.setStore(store);
   }
-  ctx.showMessage("--- Session restored ---");
-
 }
 
 function buildResumeOptionLabel(
@@ -316,7 +319,11 @@ function buildResumeOptionLabel(
   summary: string | undefined,
 ): string {
   const date = (created || "").slice(0, 16);
-  return `${index + 1}. ${date}  ${turns ?? 0} turns  ${(summary || "").slice(0, 40)}`;
+  return `${index + 1}. ${date}  ${turns ?? 0} turns  ${truncateDisplayText(summary || "", 25)}`;
+}
+
+function truncateDisplayText(text: string, maxChars: number): string {
+  return Array.from(text).slice(0, maxChars).join("");
 }
 
 function resumeOptions(ctx: CommandOptionsContext): CommandOption[] {
@@ -589,6 +596,22 @@ function runtimeModelName(provider: string, model: string): string {
   return `runtime-${slug(provider)}-${slug(model)}`;
 }
 
+function formatPresetPickerLabel(provider: string, presetModel: ProviderPresetModel): string {
+  let label = formatDisplayModelName(provider, presetModel.id);
+  if (presetModel.optionNote) {
+    label = `${label}  (${presetModel.optionNote})`;
+  }
+  return label;
+}
+
+function formatPresetSelectedHint(provider: string, presetModel: ProviderPresetModel): string {
+  let label = formatScopedModelName(provider, presetModel.id);
+  if (presetModel.optionNote) {
+    label = `${label} (${presetModel.optionNote})`;
+  }
+  return label;
+}
+
 export function resolveModelSelection(
   session: any,
   target: string,
@@ -610,17 +633,29 @@ export function resolveModelSelection(
   const parsed = parseProviderModelTarget(target);
   if (!parsed) {
     throw new Error(
-      "Invalid model target. Use config name or provider:model (e.g. openai:gpt-5).",
+      "Invalid model target. Use config name or provider:model (e.g. openai:gpt-5.4).",
     );
   }
 
+  const presetModel = findProviderPresetModel(parsed.provider, parsed.model);
+  const resolvedModel = presetModel?.id ?? parsed.model;
+  const selectionKey = presetModel?.key ?? parsed.model;
+  const presetRequiresDedicatedConfig = Boolean(
+    presetModel && (
+      presetModel.key !== presetModel.id
+      || presetModel.optionNote
+      || presetModel.config
+      || (presetModel.aliases && presetModel.aliases.length > 0)
+    ),
+  );
+
   const entries = readModelEntries(config);
   const exactEntries = entries.filter((e) =>
-    e.provider === parsed.provider && e.model === parsed.model
+    e.provider === parsed.provider && e.model === resolvedModel
   );
   const exactWithKey = exactEntries.find((e) => e.hasResolvedApiKey);
 
-  if (exactWithKey && !apiKey) {
+  if (exactWithKey && !apiKey && !presetRequiresDedicatedConfig) {
     selectedConfigName = exactWithKey.name;
   } else {
     const keySource = (apiKey && apiKey.trim() !== "")
@@ -644,16 +679,23 @@ export function resolveModelSelection(
       throw new Error("Runtime model creation is not supported by this config object.");
     }
 
-    const runtimeName = runtimeModelName(parsed.provider, parsed.model);
-    config.upsertModelRaw(runtimeName, {
-      provider: parsed.provider,
-      model: parsed.model,
-      api_key: keySource,
-    });
+    const runtimeName = runtimeModelName(parsed.provider, selectionKey);
+    config.upsertModelRaw(
+      runtimeName,
+      presetModel
+        ? buildProviderPresetRawConfig(parsed.provider, presetModel, keySource)
+        : {
+            provider: parsed.provider,
+            model: resolvedModel,
+            api_key: keySource,
+          },
+    );
     selectedConfigName = runtimeName;
   }
 
-  selectedHint = formatScopedModelName(parsed.provider, parsed.model);
+  selectedHint = presetModel
+    ? formatPresetSelectedHint(parsed.provider, presetModel)
+    : formatScopedModelName(parsed.provider, resolvedModel);
   return { selectedConfigName, selectedHint };
 }
 
@@ -673,24 +715,31 @@ function modelOptions(ctx: CommandOptionsContext): CommandOption[] {
   // Gather all providers/models:
   // 1) preset catalog
   // 2) user-defined config models (for custom IDs/providers)
-  const byProvider = new Map<string, Set<string>>();
+  const byProvider = new Map<string, Map<string, { model: string; label: string }>>();
   const providerOrder: string[] = [];
-  const addModel = (provider: string, model: string) => {
-    if (!provider || !model) return;
+  const addModel = (provider: string, selectionKey: string, model: string, label: string) => {
+    if (!provider || !selectionKey || !model) return;
     if (!byProvider.has(provider)) {
-      byProvider.set(provider, new Set());
+      byProvider.set(provider, new Map());
       providerOrder.push(provider);
     }
-    byProvider.get(provider)!.add(model);
+    if (!byProvider.get(provider)!.has(selectionKey)) {
+      byProvider.get(provider)!.set(selectionKey, { model, label });
+    }
   };
 
   for (const preset of PROVIDER_PRESETS) {
     for (const m of preset.models) {
-      addModel(preset.id, m.id);
+      addModel(preset.id, m.key, m.id, formatPresetPickerLabel(preset.id, m));
     }
   }
   for (const e of entries) {
-    addModel(e.provider, e.model);
+    addModel(
+      e.provider,
+      e.model,
+      e.model,
+      formatDisplayModelName(e.provider, e.model),
+    );
   }
 
   // Provider-level key status from config/env/current model.
@@ -710,15 +759,21 @@ function modelOptions(ctx: CommandOptionsContext): CommandOption[] {
 
   const options: CommandOption[] = [];
   for (const provider of providerOrder) {
-    const models = Array.from(byProvider.get(provider) ?? []);
-    models.sort((a, b) => a.localeCompare(b));
+    const models = Array.from((byProvider.get(provider) ?? new Map()).entries());
+    models.sort((a, b) => a[1].label.localeCompare(b[1].label));
     const children: CommandOption[] = [];
 
-    for (const model of models) {
-      const isCurrent = provider === currentProvider && model === currentModel;
+    for (const [selectionKey, item] of models) {
+      const runtimeSelectionName = runtimeModelName(provider, selectionKey);
+      const isCurrent = session.currentModelConfigName === runtimeSelectionName
+        || (
+          selectionKey === item.model
+          && provider === currentProvider
+          && item.model === currentModel
+        );
       const missingApiKey = !providerHasKey.get(providerKeyGroup(provider));
 
-      let label = formatDisplayModelName(provider, model);
+      let label = item.label;
       if (isCurrent && missingApiKey) {
         label = `${label}  (current, key missing: run longeragent init)`;
       } else if (isCurrent) {
@@ -729,7 +784,7 @@ function modelOptions(ctx: CommandOptionsContext): CommandOption[] {
 
       children.push({
         label,
-        value: `${provider}:${model}`,
+        value: `${provider}:${selectionKey}`,
       });
     }
 

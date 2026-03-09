@@ -8,7 +8,7 @@ describe("Config model validation", () => {
       raw: {
         models: {
           bad: {
-            model: "gpt-5",
+            model: "gpt-5.2",
             api_key: "sk-test",
           },
         },
@@ -43,7 +43,7 @@ describe("Config model validation", () => {
         models: {
           bad: {
             provider: "openai",
-            model: "gpt-5",
+            model: "gpt-5.2",
             api_key: "",
           },
         },
@@ -61,7 +61,7 @@ describe("Config model validation", () => {
         models: {
           bad: {
             provider: "openai",
-            model: "gpt-5",
+            model: "gpt-5.2",
             api_key: "sk-test",
             temperature: "hot",
           },

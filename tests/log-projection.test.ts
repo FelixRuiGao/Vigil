@@ -96,7 +96,7 @@ describe("projectToTuiEntries", () => {
     expect(tui[3]).toEqual({ kind: "tool_result", text: "@@ -1 +1 @@\n-old\n+new", id: "tr-001" });
   });
 
-  it("skips summarized entries", () => {
+  it("keeps summarized entries visible in TUI and hides summary entries", () => {
     const entries = basicLog();
     entries[2].summarized = true; // Mark user message as summarized
     entries[3].summarized = true;
@@ -105,9 +105,9 @@ describe("projectToTuiEntries", () => {
     entries.splice(2, 0, summary);
 
     const tui = projectToTuiEntries(entries);
-    expect(tui).toHaveLength(1);
-    expect(tui[0].kind).toBe("user"); // summary uses "user" displayKind
-    expect(tui[0].text).toBe("Summary of conversation");
+    expect(tui).toHaveLength(2);
+    expect(tui[0]).toEqual({ kind: "user", text: "Hello", id: "user-001" });
+    expect(tui[1]).toEqual({ kind: "assistant", text: "Hi there!", id: "asst-001" });
   });
 
   it("skips discarded entries", () => {

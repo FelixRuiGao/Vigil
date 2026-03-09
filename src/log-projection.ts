@@ -47,9 +47,9 @@ function isHiddenSubAgentLifecycle(entry: LogEntry): boolean {
 }
 
 function isProjectableTuiEntry(entry: LogEntry): boolean {
-  if (entry.summarized) return false;
   if (entry.discarded) return false;
   if (!entry.tuiVisible) return false;
+  if (entry.type === "summary") return false;
   if (isHiddenSubAgentLifecycle(entry)) return false;
   return true;
 }
@@ -193,7 +193,7 @@ function projectTuiWindow(entries: LogEntry[]): ConversationEntry[] {
  *
  * Rules:
  *  1. Determine fold boundary based on compact markers
- *  2. Skip: folded entries, tuiVisible===false, summarized, discarded
+ *  2. Skip: folded entries, tuiVisible===false, discarded, summary entries
  *  3. Map (displayKind, display) → ConversationEntry
  */
 export function projectToTuiEntries(
