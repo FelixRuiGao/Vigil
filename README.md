@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="LongerAgent" width="320" />
+  <img src="assets/logo.png" alt="LongerAgent" width="360" />
 </p>
 <p align="center">
   <strong>A terminal AI coding agent built for long sessions.</strong>
