@@ -5,7 +5,8 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
 
 // ------------------------------------------------------------------
@@ -489,6 +490,17 @@ function isDir(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+// ------------------------------------------------------------------
+// Bundled assets path
+// ------------------------------------------------------------------
+
+/** Return the root directory of the installed package (parent of dist/). */
+export function getBundledAssetsDir(): string {
+  // This file compiles to dist/config.js, so ".." reaches the package root.
+  const thisFile = fileURLToPath(import.meta.url);
+  return join(dirname(thisFile), "..");
 }
 
 // ------------------------------------------------------------------

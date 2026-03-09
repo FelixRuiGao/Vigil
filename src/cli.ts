@@ -13,10 +13,10 @@
  */
 
 import { existsSync, statSync } from "node:fs";
-import path from "node:path";
+import { join } from "node:path";
 import { Command } from "commander";
 
-import { Config, resolveConfigPaths } from "./config.js";
+import { Config, resolveConfigPaths, getBundledAssetsDir } from "./config.js";
 import { Agent } from "./agents/agent.js";
 import { Session } from "./session.js";
 import { loadTemplates } from "./templates/loader.js";
@@ -135,16 +135,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (!paths.templatesPath) {
-    console.error(
-      "Error: no agent_templates/ directory found.\n" +
-      "  Run 'longeragent init' to set up, or use --templates to specify the path.",
-    );
-    process.exit(1);
-  }
-
   const configPath = paths.configPath;
-  const templatesPath = paths.templatesPath;
 
   // Load config
   const config = new Config({ path: configPath });
@@ -173,18 +164,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // Load agent templates (with prompt assembly from prompts/ directory)
-  const promptsPath = paths.promptsPath;
+  // Bundled assets (always available from the installed package)
+  const bundledDir = getBundledAssetsDir();
+  const bundledTemplates = join(bundledDir, "agent_templates");
+  const bundledPrompts = join(bundledDir, "prompts");
+
+  // Build ordered prompts dirs: user override first, bundled second
+  const promptsDirs: string[] = [];
+  if (paths.promptsPath) promptsDirs.push(paths.promptsPath);
+  promptsDirs.push(bundledPrompts);
+
+  // Load agent templates (bundled + user override, with layered prompt assembly)
   const agents = loadTemplates(
-    templatesPath,
+    bundledTemplates,
     config,
     mcpManager as any,
-    promptsPath ?? undefined,
+    promptsDirs,
+    paths.templatesPath ?? undefined,
   );
   const primary = identifyPrimaryAgent(agents);
 
-  // Load skills
-  const skillsPath = paths.skillsPath;
+  // Load skills (user dir first, fall back to bundled)
+  const bundledSkills = join(bundledDir, "skills");
+  const skillsPath = paths.skillsPath ?? bundledSkills;
   const skills = skillsPath && existsSync(skillsPath) && statSync(skillsPath).isDirectory()
     ? loadSkills(skillsPath)
     : new Map();
@@ -212,7 +214,7 @@ async function main(): Promise<void> {
     skills: skills as never,
     progress: undefined,
     mcpManager: mcpManager as never,
-    promptsDir: promptsPath ?? undefined,
+    promptsDirs,
     store: store as never,
     settings,
   });

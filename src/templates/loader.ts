@@ -124,8 +124,8 @@ export const EXECUTOR_DEFAULT_TOOLS: string[] = [
  * @param config       Global Config instance (provides model resolution).
  * @param nameOverride If given, replaces the `name` field from the YAML.
  * @param mcpManager   Optional MCP client manager for MCP tool resolution.
- * @param promptsDir   Optional path to the shared `prompts/` directory.
- *                     If omitted, no tool/section prompts are assembled.
+ * @param promptsDirs  Ordered list of `prompts/` directories (user override first, bundled second).
+ *                     If omitted or empty, no tool/section prompts are assembled.
  * @returns            Fully constructed Agent, ready to use.
  */
 export function loadTemplate(
@@ -133,7 +133,7 @@ export function loadTemplate(
   config: Config,
   nameOverride?: string,
   mcpManager?: MCPClientManager,
-  promptsDir?: string,
+  promptsDirs?: string[],
 ): Agent {
   const yamlPath = join(templateDir, AGENT_YAML);
   if (!existsSync(yamlPath)) {
@@ -157,17 +157,17 @@ export function loadTemplate(
   let systemPrompt = resolveSystemPrompt(spec, templateDir);
 
   // --- 2. Assemble tool prompts ---
-  if (promptsDir) {
+  if (promptsDirs && promptsDirs.length > 0) {
     const toolNames = resolveToolNames(spec);
     validateToolDependencies(toolNames);
-    const toolPrompts = assembleToolPrompts(toolNames, promptsDir);
+    const toolPrompts = assembleToolPrompts(toolNames, promptsDirs);
     if (toolPrompts) {
       systemPrompt = systemPrompt.trimEnd() + "\n\n---\n\n# Tools\n\n" + toolPrompts;
     }
 
     // --- 3. Assemble section prompts ---
     const sections = resolveSections(spec);
-    const sectionPrompts = assembleSectionPrompts(sections, promptsDir);
+    const sectionPrompts = assembleSectionPrompts(sections, promptsDirs);
     if (sectionPrompts) {
       systemPrompt = systemPrompt.trimEnd() + "\n\n" + sectionPrompts;
     }
@@ -205,43 +205,65 @@ export function loadTemplate(
 }
 
 /**
- * Scan `templatesRoot` for template folders and load them all.
+ * Scan template directories and load all templates with layered override.
  *
- * A subfolder is considered a template if it contains `agent.yaml`.
+ * When both `bundledRoot` and `userRoot` are provided, user templates override
+ * bundled templates with the same folder name. User-only templates are also loaded.
  *
- * @param promptsDir  Path to the shared `prompts/` directory for prompt assembly.
- * @returns `{ name: agent }` record, keyed by each template's `name` field
- *          (or folder name as fallback).
+ * @param bundledRoot  Bundled templates root (always available from the package).
+ * @param config       Global Config instance.
+ * @param mcpManager   Optional MCP client manager.
+ * @param promptsDirs  Ordered prompts directories (user first, bundled second).
+ * @param userRoot     Optional user override templates root (~/.longeragent/agent_templates/).
+ * @returns `{ name: agent }` record.
  */
 export function loadTemplates(
-  templatesRoot: string,
+  bundledRoot: string,
   config: Config,
   mcpManager?: MCPClientManager,
-  promptsDir?: string,
+  promptsDirs?: string[],
+  userRoot?: string,
 ): Record<string, Agent> {
-  if (!existsSync(templatesRoot) || !statSync(templatesRoot).isDirectory()) {
-    throw new Error(`Templates root not found: ${templatesRoot}`);
+  if (!existsSync(bundledRoot) || !statSync(bundledRoot).isDirectory()) {
+    throw new Error(`Bundled templates root not found: ${bundledRoot}`);
   }
 
-  // Auto-discover prompts/ as sibling of templates root if not provided
-  const resolvedPromptsDir = promptsDir ?? resolvePromptsDir(templatesRoot);
+  // Discover template dirs: bundled first, user overrides on top
+  const templateDirs: Record<string, string> = {};
+  for (const child of readdirSync(bundledRoot).sort()) {
+    const childPath = join(bundledRoot, child);
+    if (isTemplateDir(childPath)) {
+      templateDirs[child] = childPath;
+    }
+  }
+  if (userRoot && existsSync(userRoot) && statSync(userRoot).isDirectory()) {
+    for (const child of readdirSync(userRoot).sort()) {
+      const childPath = join(userRoot, child);
+      if (isTemplateDir(childPath)) {
+        templateDirs[child] = childPath; // override bundled
+      }
+    }
+  }
+
+  const resolvedPromptsDirs = promptsDirs && promptsDirs.length > 0
+    ? promptsDirs
+    : [resolvePromptsDir(bundledRoot)].filter((d): d is string => !!d);
 
   const agents: Record<string, Agent> = {};
-  const children = readdirSync(templatesRoot).sort();
-  for (const child of children) {
-    const childPath = join(templatesRoot, child);
-    try {
-      if (!statSync(childPath).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    if (!existsSync(join(childPath, AGENT_YAML))) continue;
-
-    const agent = loadTemplate(childPath, config, undefined, mcpManager, resolvedPromptsDir);
+  for (const name of Object.keys(templateDirs).sort()) {
+    const agent = loadTemplate(templateDirs[name], config, undefined, mcpManager, resolvedPromptsDirs);
     agents[agent.name] = agent;
   }
 
   return agents;
+}
+
+function isTemplateDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory() && existsSync(join(p, AGENT_YAML));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -341,15 +363,13 @@ export function validateToolDependencies(toolNames: string[]): void {
 
 /**
  * Read and concatenate tool prompt files in canonical order.
+ * For each tool, the first matching file across `promptsDirs` is used (user override first).
  * Tools without a corresponding prompt file are silently skipped.
  */
 export function assembleToolPrompts(
   toolNames: string[],
-  promptsDir: string,
+  promptsDirs: string[],
 ): string {
-  const toolsDir = join(promptsDir, "tools");
-  if (!existsSync(toolsDir)) return "";
-
   // Sort by TOOL_PROMPT_ORDER, unknowns go to the end alphabetically
   const orderIndex = new Map(TOOL_PROMPT_ORDER.map((n, i) => [n, i]));
   const sorted = [...toolNames].sort((a, b) => {
@@ -361,8 +381,8 @@ export function assembleToolPrompts(
 
   const parts: string[] = [];
   for (const name of sorted) {
-    const filePath = join(toolsDir, `${name}.md`);
-    if (!existsSync(filePath)) continue;
+    const filePath = resolveLayeredFile(promptsDirs, "tools", `${name}.md`);
+    if (!filePath) continue;
     try {
       parts.push(readFileSync(filePath, "utf-8").trimEnd());
     } catch {
@@ -386,18 +406,18 @@ function resolveSections(spec: Record<string, unknown>): string[] {
 
 /**
  * Read and concatenate section prompt files.
+ * For each section, the first matching file across `promptsDirs` is used.
  */
 export function assembleSectionPrompts(
   sections: string[],
-  promptsDir: string,
+  promptsDirs: string[],
 ): string {
-  const sectionsDir = join(promptsDir, "sections");
-  if (!existsSync(sectionsDir) || sections.length === 0) return "";
+  if (sections.length === 0) return "";
 
   const parts: string[] = [];
   for (const name of sections) {
-    const filePath = join(sectionsDir, `${name}.md`);
-    if (!existsSync(filePath)) continue;
+    const filePath = resolveLayeredFile(promptsDirs, "sections", `${name}.md`);
+    if (!filePath) continue;
     try {
       parts.push(readFileSync(filePath, "utf-8").trimEnd());
     } catch {
@@ -406,6 +426,18 @@ export function assembleSectionPrompts(
   }
 
   return parts.join("\n\n");
+}
+
+/**
+ * Resolve a file across multiple directories, returning the first match.
+ * Directories are checked in order (user override first, bundled second).
+ */
+function resolveLayeredFile(dirs: string[], subdir: string, filename: string): string | null {
+  for (const dir of dirs) {
+    const filePath = join(dir, subdir, filename);
+    if (existsSync(filePath)) return filePath;
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------

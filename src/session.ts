@@ -353,7 +353,7 @@ export class Session {
   primaryAgent: Agent;
   config: Config;
   agentTemplates: Record<string, Agent>;
-  private _promptsDir?: string;
+  private _promptsDirs?: string[];
 
   private _progress?: ProgressReporter;
   private _mcpManager?: MCPClientManager;
@@ -454,7 +454,7 @@ export class Session {
     skills?: Map<string, SkillMeta>;
     progress?: ProgressReporter;
     mcpManager?: MCPClientManager;
-    promptsDir?: string;
+    promptsDirs?: string[];
     store?: any;
     settings?: ResolvedSettings;
   }) {
@@ -464,7 +464,7 @@ export class Session {
     this._skills = opts.skills ?? new Map();
     this._progress = opts.progress;
     this._mcpManager = opts.mcpManager;
-    this._promptsDir = opts.promptsDir;
+    this._promptsDirs = opts.promptsDirs;
 
     // Apply user settings (thresholds + max_output_tokens)
     if (opts.settings) {
@@ -4582,7 +4582,7 @@ export class Session {
   }
 
   private _createSubAgentFromPath(templateDir: string, taskId: string): Agent {
-    const templateAgent = loadTemplate(templateDir, this.config, taskId, this._mcpManager, this._promptsDir);
+    const templateAgent = loadTemplate(templateDir, this.config, taskId, this._mcpManager, this._promptsDirs);
     const modelConfig = this._getSubAgentModelConfig();
 
     const agent = new Agent({

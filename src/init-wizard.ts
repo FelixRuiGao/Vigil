@@ -5,10 +5,9 @@
  * Supports Ctrl+C / ESC to go back to the previous step.
  */
 
-import { existsSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { checkbox, select, input, confirm } from "@inquirer/prompts";
 import * as yaml from "js-yaml";
 import { LONGERAGENT_HOME_DIR } from "./config.js";
@@ -32,11 +31,6 @@ export interface WizardResult {
 // ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
-
-function getBundledAssetsDir(): string {
-  const thisFile = fileURLToPath(import.meta.url);
-  return join(dirname(thisFile), "..");
-}
 
 function isUserCancel(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
@@ -306,32 +300,13 @@ export async function runInitWizard(): Promise<WizardResult> {
   const configContent = generateConfigYaml(defaultModelName, models);
   writeFileSync(configPath, configContent, "utf-8");
 
-  // Copy bundled templates, prompts, and skills
-  const assetsDir = getBundledAssetsDir();
   const templatesPath = join(homeDir, "agent_templates");
-  const promptsPath = join(homeDir, "prompts");
   const skillsPath = join(homeDir, "skills");
-
-  const bundledTemplates = join(assetsDir, "agent_templates");
-  const bundledPrompts = join(assetsDir, "prompts");
-  const bundledSkills = join(assetsDir, "skills");
-
-  if (existsSync(bundledTemplates) && !existsSync(templatesPath)) {
-    cpSync(bundledTemplates, templatesPath, { recursive: true });
-  }
-  if (existsSync(bundledPrompts) && !existsSync(promptsPath)) {
-    cpSync(bundledPrompts, promptsPath, { recursive: true });
-  }
-  if (existsSync(bundledSkills) && !existsSync(skillsPath)) {
-    cpSync(bundledSkills, skillsPath, { recursive: true });
-  }
 
   // Summary
   console.log();
   console.log("  ✓ Configuration saved");
   console.log(`    Config:    ${configPath}`);
-  console.log(`    Templates: ${templatesPath}`);
-  console.log(`    Skills:    ${skillsPath}`);
   console.log();
   console.log(`  Default model: ${defaultModelName}`);
 

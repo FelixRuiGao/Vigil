@@ -10,7 +10,5 @@ config.local.yaml
 .DS_Store
 .venv/
 .claude/
-.longeragent-artifacts/
-.agentflow-artifacts/
 Docs/
 .archive/
