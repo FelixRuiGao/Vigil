@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Session } from "../src/session.js";
 import { SessionStore } from "../src/persistence.js";
-import { createLogSessionMeta } from "../src/persistence.js";
+import { createLogSessionMeta, loadLog, saveLog } from "../src/persistence.js";
 import {
   LogIdAllocator,
   createAssistantText,
@@ -174,6 +174,72 @@ describe("session storage lifecycle", () => {
       expect(session.lastInputTokens).toBe(7171);
       expect(session.lastTotalTokens).toBe(7510);
       expect((session as any).lastCacheReadTokens).toBe(6912);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("restores an active plan and re-injects it into provider messages after resume", async () => {
+    const baseDir = makeTempDir("longeragent-lifecycle-base-");
+    const projectRoot = makeTempDir("longeragent-lifecycle-project-");
+    try {
+      const store = new SessionStore({ baseDir, projectPath: projectRoot });
+      const session = makeSession(projectRoot, store) as any;
+      const sessionDir = store.createSession();
+      const artifactsDir = store.artifactsDir!;
+      const planPath = join(artifactsDir, "plan.md");
+
+      writeFileSync(
+        planPath,
+        [
+          "## Checkpoints",
+          "- [ ] Explore auth flow",
+          "- [ ] Implement fix",
+          "",
+          "## Implement fix",
+          "1. Patch the auth guard",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const submit = session._execPlan({ action: "submit", file: "plan.md" });
+      expect(submit.content).toContain("Plan submitted with 2 checkpoints.");
+
+      const persisted = session.getLogForPersistence();
+      saveLog(sessionDir, persisted.meta, [...persisted.entries]);
+
+      const loaded = loadLog(sessionDir);
+      expect(loaded.meta.activePlanFile).toBe(planPath);
+
+      const restoredStore = new SessionStore({ baseDir, projectPath: projectRoot });
+      restoredStore.sessionDir = sessionDir;
+      const restored = makeSession(projectRoot, restoredStore) as any;
+      restored.restoreFromLog(loaded.meta, loaded.entries, loaded.idAllocator);
+
+      restored.primaryAgent.asyncRunWithMessages = async (
+        getMessages: () => Array<Record<string, unknown>>,
+      ) => {
+        const messages = getMessages();
+        const injected = messages.find((msg) => String(msg.content ?? "").includes("## Active Plan"));
+        expect(injected).toBeTruthy();
+        expect(String(injected?.content ?? "")).toContain("## Checkpoints");
+        expect(String(injected?.content ?? "")).toContain("Explore auth flow");
+        return {
+          text: "",
+          toolHistory: [],
+          totalUsage: { inputTokens: 1, outputTokens: 0 },
+          intermediateText: [],
+          lastInputTokens: 1,
+          reasoningContent: "",
+          reasoningState: null,
+          lastTotalTokens: 1,
+          textHandledInLog: false,
+          reasoningHandledInLog: false,
+        };
+      };
+
+      await restored._runActivation();
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
       rmSync(projectRoot, { recursive: true, force: true });

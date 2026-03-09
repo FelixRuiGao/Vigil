@@ -34,6 +34,7 @@
 - `wait`
 - `show_context`
 - `summarize_context`
+- `plan`
 - `ask`
 
 ### 动态工具
@@ -70,8 +71,9 @@
 
 这几个工具虽然以“tool”形式暴露给模型，但本质上是日志协议的一部分：
 
-- `show_context` 展示当前 active window 的 context 分布，并在下一次 provider round 中临时打开详细 annotation
-- `summarize_context` 会改写当前可见上下文窗口
+- `show_context` 展示当前 active window 的 context 分布，并打开详细 annotation（持续到 `summarize_context` 调用或 `show_context(dismiss=true)` 时关闭）
+- `summarize_context` 会改写当前可见上下文窗口；支持 inline mode（直接传 operations）和 file mode（传入 `.yaml` 文件路径）；file mode 时系统自动压缩 show_context 到 summarize_context 之间的中间 read/write/edit 步骤
+- `plan` 管理执行计划：`plan(action="submit")` 注册计划文件并显示进度面板，`plan(action="check")` 勾选检查点，`plan(action="finish")` 完成并关闭面板；计划文件每轮注入上下文
 - `ask` 会挂起 activation，等待用户回答，再以 `tool_result` 闭环
 
 ## 5. 大文件与长日志

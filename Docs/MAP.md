@@ -81,6 +81,7 @@ provider 层的职责是把统一消息格式转换成各家 API 的请求，并
   - `wait`
   - `show_context`
   - `summarize_context`
+  - `plan`
   - `ask`
 - `src/session.ts`
   - 动态注入 `skill` 工具。

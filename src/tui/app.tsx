@@ -30,6 +30,7 @@ import { LogoPanel } from "./components/logo-panel.js";
 import { StatusBar, type ActivityPhase } from "./components/status-bar.js";
 import { ConversationPanel } from "./components/conversation-panel.js";
 import { AskPanel } from "./components/ask-panel.js";
+import { PlanPanel, type PlanCheckpointUi } from "./components/plan-panel.js";
 import { InputPanel, type InputPanelHandle } from "./components/input-panel.js";
 import { InputProtocolParser } from "./input/protocol.js";
 import { mapInputEventToCommand } from "./input/keymap.js";
@@ -178,6 +179,8 @@ export function App({
   const [optionNotes, setOptionNotes] = useState<Map<string, string>>(new Map());
   // Review mode: show summary of all answers before submitting (multi-question only)
   const [reviewMode, setReviewMode] = useState(false);
+  // Plan panel state
+  const [planCheckpoints, setPlanCheckpoints] = useState<PlanCheckpointUi[] | null>(null);
 
   const cancelledRef = useRef(false);
   const lastCtrlCRef = useRef(0);
@@ -483,6 +486,17 @@ export function App({
       if (event.action === "ask_resolved") {
         setPendingAsk(session.getPendingAsk?.() ?? null);
         setAskError(null);
+        return;
+      }
+
+      // ---- Plan panel events ----
+      if (event.action === "plan_submit" || event.action === "plan_update") {
+        const cps = event.extra?.["checkpoints"] as PlanCheckpointUi[] | undefined;
+        if (cps) setPlanCheckpoints(cps);
+        return;
+      }
+      if (event.action === "plan_finish") {
+        setPlanCheckpoints(null);
         return;
       }
     },
@@ -1151,6 +1165,7 @@ export function App({
         markdownMode={markdownMode}
         streamingAssistantEntryId={null}
       />
+      {planCheckpoints ? <PlanPanel checkpoints={planCheckpoints} /> : null}
       {pendingAsk ? (
         <AskPanel
           ask={pendingAsk}

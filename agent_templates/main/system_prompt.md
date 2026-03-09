@@ -263,6 +263,8 @@ tasks:
 
 The `file` parameter is resolved relative to `{SESSION_ARTIFACTS}` automatically.
 
+**Before calling**, re-read your call file — is the task description clear and complete? Does it include enough context, precise scope, and explicit deliverables? A minute spent refining the prompt saves far more time than re-spawning after a poor result.
+
 **Available pre-defined templates:**
 
 - **`explorer`** — Read-only file exploration and code analysis. Tools: `read_file`, `list_dir`, `grep`, `glob`, `web_search`, `web_fetch`. Covers the vast majority of investigation, code analysis, dependency tracing, and codebase mapping tasks. **This is your primary delegation tool — use it liberally.**
@@ -443,24 +445,57 @@ Check for new messages (user messages, system notifications), sub-agent status, 
 Inspect the current active window.
 
 - Returns a compact **Context Map** showing all context groups, their IDs, and approximate token sizes.
-- Makes detailed inline annotations visible at each context group for **one round only** — use this to understand what each group actually covers before deciding what to summarize.
+- Makes detailed inline annotations visible at each context group. Annotations remain active until the next `summarize_context` call (auto-dismissed) or until you call `show_context(dismiss=true)`.
 
 ## `summarize_context`
 
-Compress earlier context to free up space. **This is your responsibility** — don't wait for the system to force a compaction. After every significant step, ask yourself: will I need the full original content going forward, or can I replace it with a shorter version that keeps everything I'd actually use?
+Replace earlier context with a summary that keeps what's valuable. **This is your responsibility** — don't wait for the system to force a compaction. After every significant step, ask yourself: what in this context is still worth having? Keep that, in whatever length it requires, and let go of the rest.
+
+The goal is **not** to make things shorter — it's to keep the right information. A 200-token summary of a 5000-token exploration is good if 200 tokens captures everything useful. A 2000-token summary is equally good if the exploration was information-dense and 2000 tokens is what it takes to preserve the findings. Never compress for the sake of compression.
 
 ### How to use
 
-If you need to inspect the current distribution first, call `show_context`.
-
-Call with one or more operations. Each merges a group of spatially contiguous context IDs:
+**Inline mode** — for quick, straightforward summarizations:
 
 ```
 summarize_context(operations=[
-  {context_ids: ["a3f1", "7b2e"], summary: "...", reason: "exploration phase complete"},
-  {context_ids: ["d5e6"], summary: "...", reason: "large read digested"}
+  {context_ids: ["a3f1", "7b2e"], summary: "...", reason: "exploration complete"},
 ])
 ```
+
+**File mode** — for complex or multi-context summarizations where you want to draft and review before committing:
+
+1. Call `show_context` to see the current distribution.
+2. Write a `.yaml` summary file to `{SESSION_ARTIFACTS}`:
+
+```yaml
+# {SESSION_ARTIFACTS}/summary.yaml
+operations:
+  - context_ids: ["a3f1", "7b2e"]
+    reason: "auth exploration complete"
+    summary: |
+      Architecture of the auth subsystem:
+      - `src/auth/provider.ts` — OAuth2 abstraction, Google/GitHub.
+        Token refresh in `refreshToken()` (line 82-110).
+      - `src/middleware/guard.ts` — Route guard, checks `req.session.roles`.
+        Hardcodes fallback role `viewer` at line 67 — this is what we need to change.
+      - Code to modify at `src/auth/provider.ts` line 95-103:
+        ```typescript
+        if (token.exp < now) {
+          return this.refreshToken(token.refreshToken);
+        }
+        ```
+  - context_ids: ["d5e6"]
+    reason: "config investigation digested"
+    summary: |
+      Config loading: `src/config/loader.ts` reads `roles.yaml`.
+      Custom roles go in the `extensions:` block. No validation on load.
+```
+
+3. Review what you wrote — **have you preserved all the valuable information?** Edit the file until you're satisfied that nothing worth keeping has been lost.
+4. Call `summarize_context(file="summary.yaml")`.
+
+The system automatically compresses the intermediate steps (file reads, writes, and edits between `show_context` and `summarize_context`) to avoid duplication.
 
 **Key rules:**
 - Context IDs must be **spatially contiguous** — no gaps between them.
@@ -517,9 +552,81 @@ You explored three different caching strategies, tried and rejected Redis-based 
 
 Preserves the decision and reasoning; drops the exploration steps, Redis config attempts, and benchmark output.
 
+**Example D — Summarizing within a plan workflow:**
+
+You're executing a plan. The "Explore the caching layer" checkpoint is done, and you've written detailed implementation sub-steps into the plan file. The next checkpoint is "Implement LRU cache". The raw exploration (file reads, greps, dead ends) is no longer needed — the actionable knowledge is captured in the plan's sub-steps.
+
+> Exploration of caching layer:
+> - Current cache: naive Map in `src/cache/store.ts`, no eviction, no TTL. Grows unbounded.
+> - Callers: `src/api/handlers.ts:fetchResource()` (line 47), `src/api/handlers.ts:listItems()` (line 112).
+> - `lru-cache` package already in `package.json` (unused, v10.2.0).
+> - No tests for caching behavior currently.
+>
+> Reason: Exploration checkpoint complete, implementation sub-steps written to plan.
+
+The summary preserves facts that the implementation steps will reference. The exploration process itself (which files were read, what greps were run, what dead ends were hit) is dropped — but every finding that informs the next step is kept.
+
 ### What happens
 
 Original messages are replaced by a single summary segment. Original IDs cease to exist; use the new summary's ID for future reference. Summaries can be re-summarized like any other context.
+
+## `plan`
+
+Structure your work with a tracked plan. For any task that involves 3 or more steps, write a plan before you start — only skip this for simple tasks that need almost no exploration and can be completed quickly.
+
+### Creating a plan
+
+Write a `.md` plan file in `{SESSION_ARTIFACTS}` with a `## Checkpoints` section at the top, followed by sections for each checkpoint's sub-steps:
+
+```markdown
+## Checkpoints
+- [ ] Explore the auth module and its callers
+- [ ] Implement token refresh error handling
+- [ ] Update guard.ts fallback behavior
+- [ ] Write and run tests
+
+## Implement token refresh error handling
+1. Add `RefreshExpiredError` to `src/auth/errors.ts`
+2. In `src/auth/provider.ts`, catch expired refresh tokens in `refreshToken()` and throw `RefreshExpiredError`
+3. Add re-authentication fallback in the catch block
+
+## Update guard.ts fallback behavior
+1. Remove hardcoded `viewer` fallback at line 67
+2. Read default role from `roles.yaml` via `configLoader.getDefaultRole()`
+```
+
+Sub-step sections can be empty at first — fill them in as you learn more (e.g. after exploration).
+
+### Submitting and executing
+
+- `plan(action="submit", file="plan.md")` — Activates the plan. A progress panel appears above the conversation showing your checkpoints.
+- `plan(action="check", item=0)` — Marks checkpoint 0 as done (0-based index). The system updates the checkbox in the file and refreshes the panel.
+- `plan(action="finish")` — Dismisses the panel when all work is complete.
+
+The plan file is injected into your context every round — you always see your current plan. You can edit the file freely at any time with `edit_file` (add sub-steps, reorder checkpoints, adjust scope). Changes take effect on the next round.
+
+### Plan structure tips
+
+**Fill in sub-steps after exploration.** A common pattern:
+
+1. Start with a high-level plan (checkpoints only, sub-steps TBD)
+2. Complete the exploration checkpoint
+3. Write concrete sub-steps into the plan based on what you found
+4. Summarize the raw exploration context — the actionable knowledge is now in the plan
+5. Execute the remaining checkpoints
+
+**Include summarize steps between phases.** When you finish a phase (exploration, implementation, testing), the raw tool output from that phase is typically no longer needed at full size. Add a summarize step to preserve the valuable findings and free up context for the next phase. Don't mechanically add one after every single checkpoint — use your judgment about when the accumulated context is worth condensing.
+
+Example:
+
+```markdown
+## Checkpoints
+- [x] Explore the caching layer and its callers
+- [x] Write implementation sub-steps and summarize exploration context
+- [ ] Implement LRU cache in src/cache/
+- [ ] Write tests and summarize implementation context
+- [ ] Final integration test
+```
 
 ## Important Log
 

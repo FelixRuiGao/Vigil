@@ -160,7 +160,7 @@ describe("P6 summarize_context behavior", () => {
     }
   });
 
-  it("consumes show_context annotations only after a successful provider round", async () => {
+  it("persists show_context annotations across rounds until summarize or dismiss", async () => {
     const projectRoot = makeTempDir("longeragent-p6-show-context-round-");
     try {
       const session = makeSession(projectRoot) as any;
@@ -189,13 +189,15 @@ describe("P6 summarize_context behavior", () => {
         _compactCheck: unknown,
         onTokenUpdate?: (inputTokens: number, usage?: { totalTokens?: number }) => void,
       ) => {
+        // Annotations persist across multiple getMessages calls
         const first = getMessages();
         const second = getMessages();
         expect(String(first[1].content)).toContain("CTX-ANNOT");
         expect(String(second[1].content)).toContain("CTX-ANNOT");
+        // Annotations persist even after token update (no longer consumed on token update)
         onTokenUpdate?.(100, { totalTokens: 100 });
         const third = getMessages();
-        expect(String(third[1].content)).not.toContain("CTX-ANNOT");
+        expect(String(third[1].content)).toContain("CTX-ANNOT");
         return {
           text: "",
           toolHistory: [],
@@ -211,6 +213,12 @@ describe("P6 summarize_context behavior", () => {
       };
 
       await session._runActivation();
+      // Annotations still active (cleared by summarize_context or show_context(dismiss=true))
+      expect(session._showContextRoundsRemaining).toBe(1);
+      expect(session._showContextAnnotations).not.toBeNull();
+
+      // Verify dismiss clears annotations
+      session._execShowContext({ dismiss: true });
       expect(session._showContextRoundsRemaining).toBe(0);
       expect(session._showContextAnnotations).toBeNull();
     } finally {

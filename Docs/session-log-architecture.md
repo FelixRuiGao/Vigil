@@ -103,6 +103,8 @@ provider 输入由 `projectToApiMessages()` 统一生成。
 - 验证 `context_ids` 是否存在、连续、未跨 compact 边界
 - 插入 `summary` entry
 - 把被覆盖的原条目标记为 `summarized`
+- 支持 file mode（`file` 参数）：从 SESSION_ARTIFACTS 下的 `.yaml` 文件读取 `operations`
+- file mode 成功后，自动压缩 show_context 到 summarize_context 之间的中间 read/write/edit 步骤：标记为 `summarized` 并插入合成 summary entry
 
 原因：
 

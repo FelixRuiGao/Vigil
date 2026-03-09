@@ -84,11 +84,18 @@ export const SHOW_CONTEXT_TOOL: ToolDef = {
   description:
     "Display the context distribution of the current active window. " +
     "Returns a Context Map showing all context groups with their sizes and types. " +
-    "Also causes detailed annotations to appear inline for one round, " +
+    "Also causes detailed annotations to appear inline until the next summarize_context call or show_context(dismiss=true), " +
     "showing exactly what each context ID covers and the approximate size of each part.",
   parameters: {
     type: "object",
-    properties: {},
+    properties: {
+      dismiss: {
+        type: "boolean",
+        description:
+          "If true, dismiss the currently active context annotations without showing new ones.",
+      },
+    },
+    required: [],
   },
   summaryTemplate: "{agent} is inspecting context",
 };
@@ -124,8 +131,12 @@ export const SUMMARIZE_CONTEXT_TOOL: ToolDef = {
           required: ["context_ids", "summary"],
         },
       },
+      file: {
+        type: "string",
+        description: "Path to a .yaml file containing the operations. Resolved relative to session artifacts directory. Use this for complex multi-context summarizations.",
+      },
     },
-    required: ["operations"],
+    required: [],
   },
   summaryTemplate: "{agent} is summarizing context",
 };
@@ -239,4 +250,34 @@ export const WAIT_TOOL: ToolDef = {
     required: ["seconds"],
   },
   summaryTemplate: "{agent} is waiting",
+};
+
+export const PLAN_TOOL: ToolDef = {
+  name: "plan",
+  description:
+    "Manage an execution plan with tracked checkpoints. " +
+    "Submit a plan file, check off completed items, or finish the plan.",
+  parameters: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["submit", "check", "finish"],
+        description:
+          "Action to perform: 'submit' to activate a plan, 'check' to mark a checkpoint done, 'finish' to dismiss.",
+      },
+      file: {
+        type: "string",
+        description:
+          "Path to the .md plan file (required for 'submit'). Resolved relative to session artifacts directory.",
+      },
+      item: {
+        type: "number",
+        description:
+          "0-based index of the checkpoint to mark as done (required for 'check').",
+      },
+    },
+    required: ["action"],
+  },
+  summaryTemplate: "{agent} is managing plan ({action})",
 };

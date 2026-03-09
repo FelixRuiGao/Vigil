@@ -288,6 +288,7 @@ export interface LogSessionMeta {
   compactCount: number;
   thinkingLevel: string;
   cacheHitEnabled: boolean;
+  activePlanFile?: string;
 }
 
 export function createLogSessionMeta(
@@ -380,6 +381,7 @@ export function saveLog(
     compact_count: meta.compactCount,
     thinking_level: meta.thinkingLevel,
     cache_hit_enabled: meta.cacheHitEnabled,
+    active_plan_file: meta.activePlanFile ?? null,
     entries: entries.map(entryToSnake),
   };
 
@@ -411,6 +413,7 @@ export function loadLog(dir: string): LoadLogResult {
     compactCount: raw.compact_count ?? 0,
     thinkingLevel: raw.thinking_level ?? "default",
     cacheHitEnabled: raw.cache_hit_enabled ?? false,
+    activePlanFile: raw.active_plan_file ?? undefined,
   };
 
   const rawEntries = (raw.entries ?? []) as Array<Record<string, unknown>>;

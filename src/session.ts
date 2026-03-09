@@ -47,6 +47,7 @@ import {
   BASH_BACKGROUND_TOOL,
   BASH_OUTPUT_TOOL,
   KILL_SHELL_TOOL,
+  PLAN_TOOL,
 } from "./tools/comm.js";
 import { execSummarizeContextOnLog } from "./summarize-context.js";
 import { resolveSkillContent, type SkillMeta } from "./skills/loader.js";
@@ -190,7 +191,7 @@ const SYSTEM_PREFIXES = [
 
 const COMM_TOOL_NAMES = new Set([
   "spawn_agent", "kill_agent", "check_status", "wait", "show_context", "summarize_context", "ask", "skill",
-  "bash_background", "bash_output", "kill_shell",
+  "bash_background", "bash_output", "kill_shell", "plan",
 ]);
 
 // ------------------------------------------------------------------
@@ -337,6 +338,11 @@ export class Session {
   // show_context: number of remaining rounds where annotations are active
   private _showContextRoundsRemaining = 0;
   private _showContextAnnotations: Map<string, string> | null = null;
+
+  // Plan tracking
+  private _activePlanFile: string | null = null;
+  private _activePlanCheckpoints: string[] = [];
+  private _activePlanChecked: boolean[] = [];
 
   // Skills
   private _skills = new Map<string, SkillMeta>();
@@ -886,6 +892,11 @@ export class Session {
     }
     this._subAgentCounter = 0;
     this._shellCounter = 0;
+    this._showContextRoundsRemaining = 0;
+    this._showContextAnnotations = null;
+    this._activePlanFile = null;
+    this._activePlanCheckpoints = [];
+    this._activePlanChecked = [];
   }
 
   // ------------------------------------------------------------------
@@ -944,6 +955,21 @@ export class Session {
     // Restore ask state from log: find unclosed ask_request
     this._restoreAskStateFromLog(entries);
 
+    // Restore active plan from meta
+    if (meta.activePlanFile) {
+      try {
+        const content = readFileSync(meta.activePlanFile, "utf-8");
+        const { checkpoints, checked } = this._parsePlanCheckpoints(content);
+        if (checkpoints.length > 0) {
+          this._activePlanFile = meta.activePlanFile;
+          this._activePlanCheckpoints = checkpoints;
+          this._activePlanChecked = checked;
+        }
+      } catch {
+        // Plan file no longer exists — skip restoration
+      }
+    }
+
     // Rebuild ask history from ask_resolution entries
     this._askHistory = [];
     for (const e of entries) {
@@ -978,6 +1004,7 @@ export class Session {
         thinkingLevel: this._thinkingLevel,
         cacheHitEnabled: this._cacheHitEnabled,
         summary: this._generateSummary(),
+        activePlanFile: this._activePlanFile ?? undefined,
       }),
       entries: this._log,
     };
@@ -1050,9 +1077,10 @@ export class Session {
       kill_agent: (args) => this._execKillAgent(args),
       check_status: (args) => this._execCheckStatus(args),
       wait: (args) => this._execWait(args),
-      show_context: () => this._execShowContext(),
+      show_context: (args) => this._execShowContext(args),
       summarize_context: (args) => this._execSummarizeContext(args),
       ask: (args) => this._execAsk(args),
+      plan: (args) => this._execPlan(args),
       skill: (args) => this._execSkill(args),
       $web_search: (args) => toolBuiltinWebSearchPassthrough(args as Record<string, unknown>),
     };
@@ -1063,7 +1091,7 @@ export class Session {
     for (const toolDef of [
       SPAWN_AGENT_TOOL, KILL_AGENT_TOOL, CHECK_STATUS_TOOL, WAIT_TOOL,
       SHOW_CONTEXT_TOOL, SUMMARIZE_CONTEXT_TOOL,
-      ASK_TOOL,
+      ASK_TOOL, PLAN_TOOL,
       BASH_BACKGROUND_TOOL, BASH_OUTPUT_TOOL, KILL_SHELL_TOOL,
     ]) {
       if (!existing.has(toolDef.name)) {
@@ -2193,10 +2221,6 @@ export class Session {
       this._lastInputTokens = inputTokens;
       this._lastTotalTokens = usage?.totalTokens ?? inputTokens;
       this._lastCacheReadTokens = usage?.cacheReadTokens ?? 0;
-      if (this._showContextRoundsRemaining > 0) {
-        this._showContextRoundsRemaining = 0;
-        this._showContextAnnotations = null;
-      }
       this._appendEntry(
         createTokenUpdate(
           this._nextLogId("token_update"),
@@ -2277,9 +2301,32 @@ export class Session {
       const showAnnotations = this._showContextRoundsRemaining > 0
         ? this._showContextAnnotations ?? undefined
         : undefined;
+      let importantLog = this._readImportantLog();
+      // Inject active plan content alongside important log
+      if (this._activePlanFile) {
+        try {
+          const planContent = readFileSync(this._activePlanFile, "utf-8");
+          if (planContent) {
+            importantLog += `\n\n---\n## Active Plan\n${planContent}`;
+            // Detect checkpoint changes from file edits and emit update
+            const { checkpoints, checked } = this._parsePlanCheckpoints(planContent);
+            if (
+              checkpoints.length !== this._activePlanCheckpoints.length ||
+              checkpoints.some((t, i) => t !== this._activePlanCheckpoints[i]) ||
+              checked.some((c, i) => c !== this._activePlanChecked[i])
+            ) {
+              this._activePlanCheckpoints = checkpoints;
+              this._activePlanChecked = checked;
+              this._emitPlanProgress("plan_update");
+            }
+          }
+        } catch {
+          // Plan file may have been deleted externally — ignore
+        }
+      }
       return projectToApiMessages(this._log, {
         resolveImageRef: (refPath) => this._resolveImageRef(refPath),
-        importantLog: this._readImportantLog(),
+        importantLog,
         requiresAlternatingRoles: (this.primaryAgent as any)._provider.requiresAlternatingRoles,
         showContextAnnotations: showAnnotations ?? undefined,
       });
@@ -2593,7 +2640,14 @@ export class Session {
     this.onSaveRequest?.();
   }
 
-  private _execShowContext(): ToolResult {
+  private _execShowContext(args: Record<string, unknown>): ToolResult {
+    // Handle dismiss mode: clear annotations without generating new ones
+    if (args["dismiss"]) {
+      this._showContextRoundsRemaining = 0;
+      this._showContextAnnotations = null;
+      return new ToolResult({ content: "Context annotations dismissed." });
+    }
+
     const mc = this.primaryAgent.modelConfig;
     const provider = (this.primaryAgent as any)._provider;
     const budget = provider.budgetCalcMode === "full_context"
@@ -2606,8 +2660,54 @@ export class Session {
   }
 
   private _execSummarizeContext(args: Record<string, unknown>): ToolResult {
+    const fileMode = typeof args.file === "string";
+    let effectiveArgs = args;
+
+    if (fileMode) {
+      const fileRel = (args.file as string).trim();
+      if (!fileRel) {
+        return new ToolResult({ content: "Error: 'file' parameter must be a non-empty string." });
+      }
+      const artifactsDir = this._resolveSessionArtifacts();
+      let filePath: string;
+      try {
+        filePath = safePath({
+          baseDir: artifactsDir,
+          requestedPath: fileRel,
+          cwd: artifactsDir,
+          mustExist: true,
+          expectFile: true,
+          accessKind: "read",
+        }).safePath!;
+      } catch (e) {
+        if (e instanceof SafePathError) {
+          const candidatePath = (e as SafePathError).details?.resolvedPath || join(artifactsDir, fileRel);
+          return new ToolResult({
+            content:
+              `Error: summary file not found or not accessible at ${candidatePath}\n` +
+              `The 'file' parameter is resolved relative to SESSION_ARTIFACTS (${artifactsDir}).`,
+          });
+        }
+        throw e;
+      }
+      let parsed: unknown;
+      try {
+        parsed = yaml.load(readFileSync(filePath, "utf-8"));
+      } catch (e) {
+        return new ToolResult({ content: `Error: failed to parse summary file: ${e}` });
+      }
+      if (!parsed || typeof parsed !== "object") {
+        return new ToolResult({ content: "Error: summary file must be a YAML mapping." });
+      }
+      const operations = (parsed as Record<string, unknown>)["operations"];
+      if (!Array.isArray(operations)) {
+        return new ToolResult({ content: "Error: summary file must contain an 'operations' array." });
+      }
+      effectiveArgs = { operations };
+    }
+
     const result = execSummarizeContextOnLog(
-      args,
+      effectiveArgs,
       this._log,
       () => this._allocateContextId(),
       () => this._nextLogId("summary"),
@@ -2620,8 +2720,201 @@ export class Session {
     }
 
     this._annotateLatestSummarizeToolCall(result.results);
+
+    // In file mode, compress intermediate decision-process entries
+    if (fileMode && result.results.some((r) => r.success)) {
+      this._compressFileModeSummarizeSteps(args.file as string);
+    }
+
     this._touchLog();
+
+    // Auto-dismiss show_context annotations after a successful summarize
+    if (result.results.some((r) => r.success)) {
+      this._showContextRoundsRemaining = 0;
+      this._showContextAnnotations = null;
+    }
+
     return new ToolResult({ content: result.output });
+  }
+
+  // ==================================================================
+  // Plan tool
+  // ==================================================================
+
+  private _execPlan(args: Record<string, unknown>): ToolResult {
+    const action = args["action"];
+    if (typeof action !== "string" || !["submit", "check", "finish"].includes(action)) {
+      return this._toolArgError("plan", "'action' must be one of: submit, check, finish.");
+    }
+
+    if (action === "submit") {
+      const fileArg = this._argRequiredString("plan", args, "file", { nonEmpty: true });
+      if (fileArg instanceof ToolResult) return fileArg;
+      const fileRel = fileArg.trim();
+
+      const artifactsDir = this._resolveSessionArtifacts();
+      let filePath: string;
+      try {
+        filePath = safePath({
+          baseDir: artifactsDir,
+          requestedPath: fileRel,
+          cwd: artifactsDir,
+          mustExist: true,
+          expectFile: true,
+          accessKind: "read",
+        }).safePath!;
+      } catch (e) {
+        if (e instanceof SafePathError) {
+          if (e.code === "PATH_NOT_FOUND" || e.code === "PATH_NOT_FILE") {
+            const candidatePath = e.details.resolvedPath || join(artifactsDir, fileRel);
+            return new ToolResult({
+              content:
+                `Error: plan file not found at ${candidatePath}\n` +
+                `The 'file' parameter is resolved relative to SESSION_ARTIFACTS (${artifactsDir}).\n` +
+                `Make sure you wrote the plan file to this directory using write_file(path="${join(artifactsDir, fileRel)}").`,
+            });
+          }
+          return new ToolResult({ content: `Error: invalid plan file path: ${e.message}` });
+        }
+        throw e;
+      }
+
+      let content: string;
+      try {
+        content = readFileSync(filePath, "utf-8");
+      } catch (e) {
+        return new ToolResult({
+          content: `Error: could not read plan file: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+
+      const { checkpoints, checked } = this._parsePlanCheckpoints(content);
+
+      if (checkpoints.length === 0) {
+        return new ToolResult({
+          content:
+            "Error: no checkpoints found in plan file. " +
+            "Expected a '## Checkpoints' section with items like '- [ ] Do something'.",
+        });
+      }
+
+      this._activePlanFile = filePath;
+      this._activePlanCheckpoints = checkpoints;
+      this._activePlanChecked = checked;
+      this._emitPlanProgress("plan_submit");
+
+      return new ToolResult({
+        content: `Plan submitted with ${checkpoints.length} checkpoints.`,
+      });
+    }
+
+    if (action === "check") {
+      if (!this._activePlanFile) {
+        return new ToolResult({ content: "Error: no active plan. Use action='submit' first." });
+      }
+      const item = args["item"];
+      if (typeof item !== "number" || !Number.isInteger(item)) {
+        return this._toolArgError("plan", "'item' must be an integer index.");
+      }
+
+      // Re-parse checkpoints from file to handle edits since submit
+      let currentContent: string;
+      try {
+        currentContent = readFileSync(this._activePlanFile, "utf-8");
+      } catch {
+        return new ToolResult({ content: "Error: could not read plan file." });
+      }
+      const { checkpoints, checked } = this._parsePlanCheckpoints(currentContent);
+      if (checkpoints.length === 0) {
+        return new ToolResult({ content: "Error: no checkpoints found in plan file." });
+      }
+      this._activePlanCheckpoints = checkpoints;
+      this._activePlanChecked = checked;
+
+      if (item < 0 || item >= checkpoints.length) {
+        return new ToolResult({
+          content: `Error: 'item' index ${item} is out of range (0..${checkpoints.length - 1}).`,
+        });
+      }
+
+      this._activePlanChecked[item] = true;
+
+      // Update the file on disk: replace the matching unchecked item with checked
+      try {
+        const lines = currentContent.split("\n");
+        let checkpointIndex = 0;
+        let inCheckpointsSection = false;
+        for (let i = 0; i < lines.length; i++) {
+          if (/^## Checkpoints\b/.test(lines[i])) {
+            inCheckpointsSection = true;
+            continue;
+          }
+          if (inCheckpointsSection && /^## /.test(lines[i])) break;
+          if (inCheckpointsSection && /^- \[[ x]\] .+$/.test(lines[i])) {
+            if (checkpointIndex === item) {
+              lines[i] = lines[i].replace(/^- \[ \]/, "- [x]");
+              break;
+            }
+            checkpointIndex++;
+          }
+        }
+        writeFileSync(this._activePlanFile, lines.join("\n"), "utf-8");
+      } catch {
+        // File write failure is non-fatal — in-memory state is still updated
+      }
+
+      this._emitPlanProgress("plan_update");
+
+      return new ToolResult({
+        content: `Checkpoint ${item} marked as done: ${checkpoints[item]}`,
+      });
+    }
+
+    // action === "finish"
+    this._activePlanFile = null;
+    this._activePlanCheckpoints = [];
+    this._activePlanChecked = [];
+    this._emitPlanProgress("plan_finish");
+    return new ToolResult({ content: "Plan finished and dismissed." });
+  }
+
+  private _parsePlanCheckpoints(content: string): { checkpoints: string[]; checked: boolean[] } {
+    const checkpoints: string[] = [];
+    const checked: boolean[] = [];
+    let inCheckpointsSection = false;
+    for (const line of content.split("\n")) {
+      if (/^## Checkpoints\b/.test(line)) {
+        inCheckpointsSection = true;
+        continue;
+      }
+      if (inCheckpointsSection && /^## /.test(line)) break;
+      if (inCheckpointsSection) {
+        const match = line.match(/^- \[([x ])\] (.+)$/);
+        if (match) {
+          checkpoints.push(match[2]);
+          checked.push(match[1] === "x");
+        }
+      }
+    }
+    return { checkpoints, checked };
+  }
+
+  private _emitPlanProgress(action: "plan_submit" | "plan_update" | "plan_finish"): void {
+    if (!this._progress) return;
+    const checkpoints = this._activePlanCheckpoints.map((text, i) => ({
+      text,
+      checked: this._activePlanChecked[i] ?? false,
+    }));
+    this._progress.emit({
+      step: this._turnCount,
+      agent: this.primaryAgent.name,
+      action,
+      message: "",
+      level: "normal" as ProgressLevel,
+      timestamp: Date.now() / 1000,
+      usage: {},
+      extra: { checkpoints },
+    });
   }
 
   private _annotateLatestSummarizeToolCall(results: Array<{ success: boolean; newContextId?: string }>): void {
@@ -2661,6 +2954,108 @@ export class Session {
         operations,
       },
     };
+  }
+
+  /**
+   * Compress intermediate tool calls (read_file, write_file, edit_file) between the
+   * last show_context and the current summarize_context when file mode was used.
+   * These entries represent the "decision process" of building the summary file.
+   */
+  private _compressFileModeSummarizeSteps(filePath: string): void {
+    // Resolve the full file path for matching against tool call arguments
+    const artifactsDir = this._resolveSessionArtifacts();
+    const resolvedFilePath = resolve(artifactsDir, filePath.trim());
+
+    // Find the current summarize_context tool_call (most recent unresolved one)
+    let summarizeIdx = -1;
+    const resolvedToolCallIds = new Set<string>();
+    for (let i = this._log.length - 1; i >= 0; i--) {
+      const entry = this._log[i];
+      if (entry.discarded) continue;
+      if (entry.type === "tool_result") {
+        const toolCallId = (entry.meta as Record<string, unknown>)["toolCallId"];
+        if (toolCallId) resolvedToolCallIds.add(String(toolCallId));
+        continue;
+      }
+      if (entry.type !== "tool_call") continue;
+      const toolCallId = String((entry.meta as Record<string, unknown>)["toolCallId"] ?? "");
+      if (resolvedToolCallIds.has(toolCallId)) continue;
+      if ((entry.meta as Record<string, unknown>)["toolName"] !== "summarize_context") continue;
+      summarizeIdx = i;
+      break;
+    }
+    if (summarizeIdx < 0) return;
+
+    // Find the most recent show_context tool_call before the summarize_context
+    let showContextIdx = -1;
+    for (let i = summarizeIdx - 1; i >= 0; i--) {
+      const entry = this._log[i];
+      if (entry.discarded || entry.summarized) continue;
+      if (entry.type !== "tool_call") continue;
+      if ((entry.meta as Record<string, unknown>)["toolName"] === "show_context") {
+        showContextIdx = i;
+        break;
+      }
+    }
+    if (showContextIdx < 0) return;
+
+    // Collect all entries between show_context and summarize_context (exclusive on both ends)
+    const FILE_TOOLS = new Set(["read_file", "write_file", "edit_file"]);
+    const candidateIndices: number[] = [];
+    let allQualify = true;
+
+    for (let i = showContextIdx + 1; i < summarizeIdx; i++) {
+      const entry = this._log[i];
+      if (entry.discarded || entry.summarized) continue;
+
+      if (entry.type === "tool_call") {
+        const toolName = (entry.meta as Record<string, unknown>)["toolName"];
+        if (!FILE_TOOLS.has(String(toolName))) {
+          allQualify = false;
+          break;
+        }
+        // Check that the tool operates on the summary file
+        const content = entry.content as Record<string, unknown>;
+        const toolArgs = (content["arguments"] as Record<string, unknown>) ?? {};
+        const toolPath = String(toolArgs["path"] ?? "");
+        const resolvedToolPath = resolve(artifactsDir, toolPath);
+        if (resolvedToolPath !== resolvedFilePath) {
+          allQualify = false;
+          break;
+        }
+        candidateIndices.push(i);
+      } else if (entry.type === "tool_result" || entry.type === "assistant_text" || entry.type === "reasoning") {
+        candidateIndices.push(i);
+      } else {
+        // Other entry types (e.g. user_message) — don't compress
+        allQualify = false;
+        break;
+      }
+    }
+
+    if (!allQualify || candidateIndices.length === 0) return;
+
+    // Mark all intermediate entries as summarized
+    const summarizedEntryIds: string[] = [];
+    for (const idx of candidateIndices) {
+      this._log[idx].summarized = true;
+      summarizedEntryIds.push(this._log[idx].id);
+    }
+
+    // Insert a synthetic summary entry right before the summarize_context tool_call
+    const newCtxId = this._allocateContextId();
+    const summaryContent =
+      "[Summary (decision process)] summarize_context decision process between show_context and import — omitted.";
+    const summaryEntry = createSummary(
+      this._nextLogId("summary"),
+      this._turnCount,
+      summaryContent,
+      summaryContent,
+      newCtxId,
+      summarizedEntryIds,
+      1,
+    );
+    this._log.splice(summarizeIdx, 0, summaryEntry);
   }
 
   /**
@@ -3390,6 +3785,7 @@ export class Session {
     }
 
     const spawned: string[] = [];
+    const spawnedInfo: Array<{ numericId: number; taskId: string; template: string; task: string }> = [];
     const errors: string[] = [];
 
     for (const spec of tasksSpec) {
@@ -3454,6 +3850,7 @@ export class Session {
         toolCallCount: 0,
       });
       spawned.push(taskId);
+      spawnedInfo.push({ numericId, taskId, template: templateLabel, task: taskDesc });
 
       if (this._progress) {
         this._progress.onAgentStart(
@@ -3485,7 +3882,25 @@ export class Session {
     if (errors.length) {
       parts.push("Errors: " + errors.join(" | "));
     }
-    return new ToolResult({ content: parts.join("\n") || "No agents spawned." });
+
+    // Build TUI preview: list each sub-agent with truncated task
+    let previewText: string | undefined;
+    if (spawnedInfo.length) {
+      const maxTaskLen = 120;
+      const lines = spawnedInfo.map((info) => {
+        const taskOneLine = info.task.replace(/\s+/g, " ");
+        const taskTrunc = taskOneLine.length > maxTaskLen
+          ? taskOneLine.slice(0, maxTaskLen - 1) + "…"
+          : taskOneLine;
+        return `  #${info.numericId} ${info.taskId} [${info.template}] — ${taskTrunc}`;
+      });
+      previewText = `Spawned ${spawnedInfo.length} sub-agent(s):\n${lines.join("\n")}`;
+    }
+
+    return new ToolResult({
+      content: parts.join("\n") || "No agents spawned.",
+      metadata: previewText ? { tui_preview: { text: previewText } } : undefined,
+    });
   }
 
   private _execKillAgent(args: Record<string, unknown>): ToolResult {
