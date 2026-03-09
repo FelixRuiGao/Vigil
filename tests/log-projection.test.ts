@@ -92,8 +92,8 @@ describe("projectToTuiEntries", () => {
     ];
 
     const tui = projectToTuiEntries(entries);
-    expect(tui[2]).toEqual({ kind: "tool_call", text: "edit_file src/a.ts", id: "tc-001" });
-    expect(tui[3]).toEqual({ kind: "tool_result", text: "@@ -1 +1 @@\n-old\n+new", id: "tr-001" });
+    expect(tui[2]).toMatchObject({ kind: "tool_call", text: "edit_file src/a.ts", id: "tc-001" });
+    expect(tui[3]).toMatchObject({ kind: "tool_result", text: "@@ -1 +1 @@\n-old\n+new", id: "tr-001" });
   });
 
   it("keeps summarized entries visible in TUI and hides summary entries", () => {

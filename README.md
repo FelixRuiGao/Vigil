@@ -1,6 +1,15 @@
-# LongerAgent
-
-**The AI coding agent that never forgets.**
+<p align="center">
+  <img src="assets/logo.png" alt="LongerAgent" />
+</p>
+<p align="center">
+  <strong>A terminal AI coding agent built for long sessions.</strong>
+</p>
+<p align="center">
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+  <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript&logoColor=white" />
+  <img alt="Author" src="https://img.shields.io/badge/author-Felix%20Gao-4b4bf0?style=flat-square" />
+</p>
 
 Most AI agents crash, loop, or silently lose context when conversations get long. LongerAgent is built from the ground up for sessions that last hours — with a structured log architecture, three-layer context management, and persistent memory that survives across sessions.
 
