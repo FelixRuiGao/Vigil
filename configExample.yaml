@@ -21,12 +21,12 @@ models:
 
   # ── OpenAI ─────────────────────────────────────────────────────────
   # my-openai:
-  #   provider: openai                # uses Chat Completions API
+  #   provider: openai                # uses Responses API (web search, reasoning)
   #   model: gpt-5.2                  # or: gpt-5.2-codex, gpt-5.3-codex, gpt-5.4
   #   api_key: ${OPENAI_API_KEY}
 
-  # my-openai-responses:
-  #   provider: openai-responses      # uses Responses API (web search, reasoning)
+  # my-openai-chat:
+  #   provider: openai-chat           # uses Chat Completions API
   #   model: gpt-5.2                  # or: gpt-5.2-codex, gpt-5.3-codex, gpt-5.4
   #   api_key: ${OPENAI_API_KEY}
 

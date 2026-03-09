@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.tmp/
+.pnpm-store/
 .env
 .env.*
 config.yaml

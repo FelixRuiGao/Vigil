@@ -184,12 +184,28 @@ async function main(): Promise<void> {
   );
   const primary = identifyPrimaryAgent(agents);
 
-  // Load skills (user dir first, fall back to bundled)
+  // Load skills (user overrides layered on top of bundled defaults).
   const bundledSkills = join(bundledDir, "skills");
-  const skillsPath = paths.skillsPath ?? bundledSkills;
-  const skills = skillsPath && existsSync(skillsPath) && statSync(skillsPath).isDirectory()
-    ? loadSkills(skillsPath)
+  const bundledSkillMap = existsSync(bundledSkills) && statSync(bundledSkills).isDirectory()
+    ? loadSkills(bundledSkills)
     : new Map();
+  let skills = bundledSkillMap;
+  const userSkillsPath = paths.skillsPath;
+  if (
+    userSkillsPath &&
+    userSkillsPath !== bundledSkills &&
+    existsSync(userSkillsPath) &&
+    statSync(userSkillsPath).isDirectory()
+  ) {
+    const userSkillMap = loadSkills(userSkillsPath);
+    if (userSkillMap.size > 0) {
+      const merged = new Map(bundledSkillMap);
+      for (const [name, skill] of userSkillMap.entries()) {
+        merged.set(name, skill);
+      }
+      skills = merged;
+    }
+  }
 
   // Session store (session directory is created lazily on the first turn)
   let store: SessionStore;

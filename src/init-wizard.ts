@@ -302,6 +302,9 @@ export async function runInitWizard(): Promise<WizardResult> {
 
   const templatesPath = join(homeDir, "agent_templates");
   const skillsPath = join(homeDir, "skills");
+  // Prepare user override directories so users can customize templates/skills directly.
+  mkdirSync(templatesPath, { recursive: true });
+  mkdirSync(skillsPath, { recursive: true });
 
   // Summary
   console.log();

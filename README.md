@@ -36,7 +36,7 @@ You can type messages to the agent at any time — even while it's working. Mess
 # Install globally
 npm install -g longer-agent
 
-# Run the setup wizard (creates ~/.longeragent/config.yaml)
+# Run the setup wizard (creates ~/.longeragent/config.yaml and empty override dirs)
 longeragent init
 
 # Start LongerAgent
@@ -49,10 +49,10 @@ longeragent
 |----------|--------|-------------|
 | **Anthropic** | Claude Haiku 4.5, Opus 4.6, Sonnet 4.6 (+ 1M context beta variants) | `ANTHROPIC_API_KEY` |
 | **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5.3 Codex, GPT-5.4 | `OPENAI_API_KEY` |
-| **Kimi / Moonshot (China)** | Kimi K2.5, K2 Instruct, K2 Thinking | `KIMI_CN_API_KEY` |
-| **Kimi / Moonshot (Global)** | Kimi K2.5, K2 Instruct, K2 Thinking | `KIMI_API_KEY` |
-| **MiniMax** | M2.1, M2.5, M2.5 Highspeed, M1-40k, M1-80k | `MINIMAX_API_KEY` |
-| **GLM / Zhipu** | GLM-5, GLM-4.7, GLM-4.7 Flash | `GLM_API_KEY` |
+| **Kimi / Moonshot (China)** | Kimi K2.5, K2 Instruct | `KIMI_CN_API_KEY` |
+| **Kimi / Moonshot (Global)** | Kimi K2.5, K2 Instruct | `KIMI_API_KEY` |
+| **MiniMax** | M2.1, M2.5 | `MINIMAX_API_KEY` |
+| **GLM / Zhipu** | GLM-5, GLM-4.7 | `GLM_API_KEY` |
 | **OpenRouter** | Curated presets for Claude, GPT, Kimi, MiniMax, GLM, plus any custom model | `OPENROUTER_API_KEY` |
 
 ## Tools
@@ -80,21 +80,17 @@ longeragent
 
 ## Configuration
 
-LongerAgent stores its configuration in `~/.longeragent/`:
+LongerAgent loads bundled defaults from the installed package (`agent_templates/`, `prompts/`, `skills/`) and user overrides from `~/.longeragent/`.
+`longeragent init` creates `config.yaml` plus empty `agent_templates/` and `skills/` override directories.
 
 ```text
 ~/.longeragent/
-├── config.yaml            # Model and provider configurations
-├── settings.json          # Runtime tuning (thresholds, max output tokens)
+├── config.yaml            # Model and provider configurations (created by init)
+├── settings.json          # Runtime tuning (optional, user-managed)
 ├── tui-preferences.json   # Auto-saved TUI state
-├── agent_templates/       # Agent definitions
-│   ├── main/
-│   ├── explorer/
-│   └── executor/
-├── prompts/               # Tool and section prompts
-│   ├── tools/             # 24 individual tool prompts
-│   └── sections/          # Section prompts (important_log, system_mechanisms)
-└── skills/                # Reusable skill definitions
+├── agent_templates/       # Optional user template overrides (empty by default)
+├── skills/                # Optional user skills (empty by default)
+└── prompts/               # Optional user prompt overrides (create manually if needed)
 ```
 
 See [configExample.yaml](./configExample.yaml) for a configuration reference.
