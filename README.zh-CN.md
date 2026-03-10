@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/logo.png" alt="LongerAgent" width="360" />
 </p>
 <p align="center">
-  <strong>为长时间会话而生的终端 AI 编程助手。</strong>
+  <strong>Built to work longer.</strong>
 </p>
 <p align="center">
   <a href="./README.md">English</a> | 中文
@@ -14,13 +14,11 @@
   <img alt="Author" src="https://img.shields.io/badge/author-Felix%20Rui%20Gao-4b4bf0?style=flat-square" />
 </p>
 
-大多数 AI 助手在长对话中会崩溃、循环或悄悄丢失上下文。LongerAgent 从底层为长时间会话而设计——结构化日志架构、三层上下文管理、跨会话持久记忆。
+一个能主动管理自身上下文、运行并行子 Agent、并允许你在工作中随时发送消息的终端 AI 编程助手。
 
 ![LongerAgent Terminal UI](https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/screenshot.png)
 
-> **平台：** macOS。Windows 未经测试。
->
-> **安全：** LongerAgent 不对命令做沙盒隔离，也不会在文件编辑和 Shell 执行前要求审批。请在可信环境中使用，并留意它的操作。
+> **平台：** macOS。
 
 ## 快速开始
 
@@ -225,6 +223,10 @@ pnpm build          # 构建
 pnpm test           # 运行测试（vitest）
 pnpm typecheck      # 类型检查
 ```
+
+## 安全
+
+LongerAgent 不对命令做沙盒隔离，也不会在文件编辑和 Shell 执行前要求审批。请在可信环境中使用，并留意它的操作。
 
 ## 许可证
 

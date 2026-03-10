@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/logo.png" alt="LongerAgent" width="360" />
 </p>
 <p align="center">
-  <strong>A terminal AI coding agent built for long sessions.</strong>
+  <strong>Built to work longer.</strong>
 </p>
 <p align="center">
   English | <a href="./README.zh-CN.md">中文</a>
@@ -14,13 +14,11 @@
   <img alt="Author" src="https://img.shields.io/badge/author-Felix%20Rui%20Gao-4b4bf0?style=flat-square" />
 </p>
 
-Most AI agents crash, loop, or silently lose context when conversations get long. LongerAgent is built from the ground up for sessions that last longer — with a structured log architecture, three-layer context management, and persistent memory that survives across sessions.
+A terminal AI coding agent that manages its own context proactively, runs parallel sub-agents, and lets you message it while it's working.
 
 ![LongerAgent Terminal UI](https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/screenshot.png)
 
-> **Platform:** macOS. Windows is not tested.
->
-> **Security:** LongerAgent does not sandbox commands or require approval before file edits and shell execution. Use it in trusted environments and review what it does.
+> **Platform:** macOS.
 
 ## Quick Start
 
@@ -225,6 +223,10 @@ pnpm build          # Build
 pnpm test           # Run tests (vitest)
 pnpm typecheck      # Type check
 ```
+
+## Security
+
+LongerAgent does not sandbox commands or require approval before file edits and shell execution. Use it in trusted environments and review what it does.
 
 ## License
 
