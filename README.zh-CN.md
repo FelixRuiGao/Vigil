@@ -18,7 +18,7 @@
 
 ![LongerAgent Terminal UI](https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/screenshot.png)
 
-https://github.com/user-attachments/assets/e405916d-f205-4995-b4b3-ce81b19af618
+https://github.com/user-attachments/assets/377fe648-d43c-45da-b111-9434b2a0dc61
 
 > **平台：** macOS。Windows 未经测试。
 >
