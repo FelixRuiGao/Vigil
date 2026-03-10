@@ -338,8 +338,29 @@ export class OpenAIResponsesProvider extends BaseProvider {
       input: inputItems,
     };
 
-    // Temperature (skip for model families that reject this field).
-    if (supportsTemperature(this._config.model)) {
+    // Codex backend requires system prompt as top-level `instructions`,
+    // not as developer-role items in the input array.
+    if (this._config.provider === "openai-codex") {
+      const systemParts: string[] = [];
+      const filtered: Record<string, unknown>[] = [];
+      for (const item of inputItems) {
+        if ((item as { role?: string }).role === "developer") {
+          systemParts.push(String(item["content"] ?? ""));
+        } else {
+          filtered.push(item);
+        }
+      }
+      if (systemParts.length > 0) {
+        kwargs["instructions"] = systemParts.join("\n\n");
+        kwargs["input"] = filtered;
+      }
+    }
+
+    // Codex backend does not support temperature or max_output_tokens.
+    const isCodex = this._config.provider === "openai-codex";
+
+    // Temperature (skip for model families and Codex that reject this field).
+    if (!isCodex && supportsTemperature(this._config.model)) {
       const temp =
         options?.temperature !== undefined
           ? options.temperature
@@ -349,7 +370,7 @@ export class OpenAIResponsesProvider extends BaseProvider {
       }
     }
 
-    if (options?.maxTokens || this._config.maxTokens) {
+    if (!isCodex && (options?.maxTokens || this._config.maxTokens)) {
       kwargs["max_output_tokens"] = options?.maxTokens || this._config.maxTokens;
     }
 
@@ -368,8 +389,9 @@ export class OpenAIResponsesProvider extends BaseProvider {
     }
     this._applyThinkingParams(kwargs, options);
 
-    if (options?.onTextChunk || options?.onReasoningChunk) {
-      return this._callStream(kwargs, options.onTextChunk, options.onReasoningChunk, options?.signal);
+    // Codex backend requires stream=true for all requests.
+    if (options?.onTextChunk || options?.onReasoningChunk || this._config.provider === "openai-codex") {
+      return this._callStream(kwargs, options?.onTextChunk, options?.onReasoningChunk, options?.signal);
     }
 
     const response = await (this._client as unknown as { responses: { create: (params: Record<string, unknown>, opts?: Record<string, unknown>) => Promise<Record<string, unknown>> } }).responses.create(kwargs, options?.signal ? { signal: options.signal } : undefined);

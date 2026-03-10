@@ -173,6 +173,56 @@ describe("resume command", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it("surfaces restore failures and does not bind the store to the target session", async () => {
+    const registry = buildDefaultRegistry();
+    const resume = registry.lookup("/resume");
+    expect(resume).toBeTruthy();
+
+    const entries = [
+      createSystemPrompt("sys-001", 0, "You are helpful"),
+      createTurnStart("ts-001", 1),
+      createUserMessage("user-001", 1, "Hello!", "Hello!", { contextId: "c1" }),
+      createAssistantText("asst-001", 1, 0, "Hi there!", "Hi there!"),
+    ];
+    const { tmpDir, sessionDir } = makeTempSession(entries, {
+      modelConfigName: "missing-model",
+    });
+
+    const store = {
+      sessionDir: "",
+      listSessions: vi.fn(() => [
+        { path: sessionDir, created: "2026-03-01 10:00:00", summary: "hello chat", turns: 1 },
+      ]),
+    };
+
+    const showMessage = vi.fn();
+    const setStore = vi.fn();
+    const ctx: CommandContext = {
+      session: {
+        restoreFromLog: vi.fn(() => {
+          throw new Error("Model config 'missing-model' not found.");
+        }),
+        setStore,
+        lastInputTokens: 0,
+      },
+      showMessage,
+      store: store as unknown as CommandContext["store"],
+      autoSave: vi.fn(),
+      resetUiState: vi.fn(),
+      commandRegistry: registry,
+    };
+
+    await resume!.handler(ctx, "1");
+
+    expect(showMessage).toHaveBeenCalledWith(
+      "Failed to restore session: Model config 'missing-model' not found.",
+    );
+    expect(store.sessionDir).toBe("");
+    expect(setStore).not.toHaveBeenCalled();
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("shows local timestamps in /resume list output", async () => {
     const registry = buildDefaultRegistry();
     const resume = registry.lookup("/resume");

@@ -5,6 +5,9 @@
   <strong>A terminal AI coding agent built for long sessions.</strong>
 </p>
 <p align="center">
+  English | <a href="./README.zh-CN.md">中文</a>
+</p>
+<p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript&logoColor=white" />
@@ -121,7 +124,7 @@ Three layers work together to keep context under control:
 | Provider | Models | Env Variable |
 |----------|--------|-------------|
 | **Anthropic** | Claude Haiku 4.5, Opus 4.6, Sonnet 4.6 (+ 1M context variants) | `ANTHROPIC_API_KEY` |
-| **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5.3 Codex, GPT-5.4 | `OPENAI_API_KEY` |
+| **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5.3 Codex, GPT-5.4 | `OPENAI_API_KEY` or OAuth |
 | **Kimi / Moonshot** | Kimi K2.5, K2 Instruct (Global, China, Coding Plan) | `KIMI_CN_API_KEY` / `KIMI_API_KEY` |
 | **MiniMax** | M2.1, M2.5 (Global, China) | `MINIMAX_API_KEY` |
 | **GLM / Zhipu** | GLM-5, GLM-4.7 (Global, China, Coding Plan) | `GLM_API_KEY` |
@@ -201,6 +204,9 @@ LongerAgent is built around a **Session → Agent → Provider** pipeline:
 ```text
 longeragent                     # Start with auto-detected config
 longeragent init                # Run setup wizard
+longeragent oauth               # Log in to OpenAI via OAuth (device code / browser)
+longeragent oauth status        # Check OAuth login status
+longeragent oauth logout        # Log out
 longeragent --config <path>     # Use a specific config file
 longeragent --templates <path>  # Use a specific templates directory
 longeragent --verbose           # Enable debug logging

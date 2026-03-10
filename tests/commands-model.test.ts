@@ -1,5 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildDefaultRegistry, type CommandContext } from "../src/commands.js";
+
+const MODEL_TEST_ENV_VARS = [
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENROUTER_API_KEY",
+  "KIMI_API_KEY",
+  "KIMI_CN_API_KEY",
+  "KIMI_CODE_API_KEY",
+  "GLM_API_KEY",
+  "GLM_INTL_API_KEY",
+  "MINIMAX_API_KEY",
+  "MINIMAX_CN_API_KEY",
+];
+
+const savedModelTestEnv = new Map<string, string | undefined>();
 
 function makeContext(
   registry: ReturnType<typeof buildDefaultRegistry>,
@@ -15,6 +30,25 @@ function makeContext(
 }
 
 describe("/model command", () => {
+  beforeEach(() => {
+    savedModelTestEnv.clear();
+    for (const envVar of MODEL_TEST_ENV_VARS) {
+      savedModelTestEnv.set(envVar, process.env[envVar]);
+      delete process.env[envVar];
+    }
+  });
+
+  afterEach(() => {
+    for (const [envVar, value] of savedModelTestEnv.entries()) {
+      if (value === undefined) {
+        delete process.env[envVar];
+      } else {
+        process.env[envVar] = value;
+      }
+    }
+    savedModelTestEnv.clear();
+  });
+
   it("shows all preset models and marks models that require API key", () => {
     const registry = buildDefaultRegistry();
     const cmd = registry.lookup("/model");

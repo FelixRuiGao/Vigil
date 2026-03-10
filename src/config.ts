@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
+import { readOAuthAccessToken, hasOAuthTokens } from "./auth/openai-oauth.js";
 
 // ------------------------------------------------------------------
 // Data interfaces
@@ -317,6 +318,8 @@ function parseEnvRef(value: string): string | null {
 
 function hasResolvableApiKey(value: unknown): boolean {
   if (typeof value !== "string" || value.trim() === "") return false;
+  // OAuth token check
+  if (value === "oauth:openai-codex") return hasOAuthTokens();
   if (value.startsWith("${") && value.endsWith("}")) {
     const envName = value.slice(2, -1);
     const resolved = process.env[envName];
@@ -506,6 +509,7 @@ export function getBundledAssetsDir(): string {
 // ------------------------------------------------------------------
 
 const PROVIDER_URLS: Record<string, string> = {
+  "openai-codex": "https://chatgpt.com/backend-api/codex",
   "kimi": "https://api.moonshot.ai/v1",
   "kimi-cn": "https://api.moonshot.cn/v1",
   "kimi-ai": "https://api.moonshot.ai/v1",
@@ -554,6 +558,18 @@ export class Config {
     const baseUrl = optionalConfigStringField(name, cfg, "base_url") || PROVIDER_URLS[provider];
     const apiKeyEnv = parseEnvRef(apiKeyRaw);
     const resolvedApiKey = (() => {
+      // OAuth token resolution
+      if (apiKeyRaw === "oauth:openai-codex") {
+        const token = readOAuthAccessToken();
+        if (!token) {
+          throw new Error(
+            `Missing OAuth token for model config '${name}' (${provider}/${modelName}): ` +
+            "no OpenAI OAuth credentials stored.\n" +
+            "Run 'longeragent oauth' to log in with your ChatGPT account.",
+          );
+        }
+        return token;
+      }
       if (!apiKeyEnv) return apiKeyRaw;
       const fromEnv = process.env[apiKeyEnv];
       if (typeof fromEnv === "string" && fromEnv.trim() !== "") {

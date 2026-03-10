@@ -19,7 +19,7 @@ export function createProvider(config: ModelConfig): BaseProvider {
     return new AnthropicProvider(config);
   }
 
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "openai-codex") {
     return new OpenAIResponsesProvider(config);
   }
 
@@ -45,7 +45,7 @@ export function createProvider(config: ModelConfig): BaseProvider {
 
   throw new Error(
     `Unknown provider '${config.provider}'. ` +
-      "Supported: anthropic, openai, openai-chat, kimi, kimi-cn, kimi-ai, kimi-code, " +
+      "Supported: anthropic, openai, openai-codex, openai-chat, kimi, kimi-cn, kimi-ai, kimi-code, " +
       "glm, glm-intl, glm-code, glm-intl-code, minimax, minimax-cn, openrouter",
   );
 }

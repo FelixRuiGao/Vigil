@@ -21,12 +21,12 @@ import {
 } from "./config.js";
 import {
   PROVIDER_PRESETS,
-  buildProviderPresetRawConfig,
-  findProviderPresetModel,
   type ProviderPresetModel,
 } from "./provider-presets.js";
+import { resolveModelSelection as resolveModelSelectionCore } from "./model-selection.js";
 import { resolveSkillContent, type SkillMeta } from "./skills/loader.js";
 import { ACCENT_PRESETS, DEFAULT_ACCENT, setAccent, theme } from "./tui/theme.js";
+import { hasOAuthTokens } from "./auth/openai-oauth.js";
 
 // ------------------------------------------------------------------
 // Types
@@ -498,6 +498,7 @@ interface ModelEntryLike {
 const PROVIDER_KEY_GROUP_ALIASES: Record<string, string> = {
   "openai-chat": "openai",
   "openai-responses": "openai",
+  "openai-codex": "openai-codex", // Separate group — uses OAuth, not shared API key
   "kimi-cn": "kimi",
   "kimi-ai": "kimi",
   "kimi-code": "kimi",
@@ -597,6 +598,14 @@ function getProviderKeySource(
 
   const envVar = PROVIDER_ENV_VARS.get(group);
   if (hasEnvApiKey(envVar)) return `\${${envVar}}`;
+
+  // OAuth fallback for openai-codex
+  if (provider === "openai-codex") {
+    try {
+      if (hasOAuthTokens()) return "oauth:openai-codex";
+    } catch { /* ignore */ }
+  }
+
   return undefined;
 }
 
@@ -629,87 +638,8 @@ export function resolveModelSelection(
   session: any,
   target: string,
   apiKey?: string,
-): { selectedConfigName: string; selectedHint: string } {
-  const config = session.config;
-  let selectedConfigName = target;
-  let selectedHint = target;
-
-  const knownNames = new Set<string>((config?.modelNames as string[]) ?? []);
-  if (knownNames.has(selectedConfigName)) {
-    const existing = config.getModel(selectedConfigName);
-    return {
-      selectedConfigName,
-      selectedHint: formatScopedModelName(existing.provider, existing.model),
-    };
-  }
-
-  const parsed = parseProviderModelTarget(target);
-  if (!parsed) {
-    throw new Error(
-      "Invalid model target. Use config name or provider:model (e.g. openai:gpt-5.4).",
-    );
-  }
-
-  const presetModel = findProviderPresetModel(parsed.provider, parsed.model);
-  const resolvedModel = presetModel?.id ?? parsed.model;
-  const selectionKey = presetModel?.key ?? parsed.model;
-  const presetRequiresDedicatedConfig = Boolean(
-    presetModel && (
-      presetModel.key !== presetModel.id
-      || presetModel.optionNote
-      || presetModel.config
-      || (presetModel.aliases && presetModel.aliases.length > 0)
-    ),
-  );
-
-  const entries = readModelEntries(config);
-  const exactEntries = entries.filter((e) =>
-    e.provider === parsed.provider && e.model === resolvedModel
-  );
-  const exactWithKey = exactEntries.find((e) => e.hasResolvedApiKey);
-
-  if (exactWithKey && !apiKey && !presetRequiresDedicatedConfig) {
-    selectedConfigName = exactWithKey.name;
-  } else {
-    const keySource = (apiKey && apiKey.trim() !== "")
-      ? apiKey
-      : getProviderKeySource(entries, parsed.provider)
-        ?? (session.primaryAgent?.modelConfig?.provider === parsed.provider
-          && session.primaryAgent?.modelConfig?.apiKey
-          ? session.primaryAgent.modelConfig.apiKey
-          : undefined);
-
-    if (!keySource) {
-      const envVar = PROVIDER_ENV_VARS.get(providerKeyGroup(parsed.provider));
-      const envHint = envVar ? ` or export ${envVar}` : "";
-      throw new Error(
-        `Missing API key for provider '${parsed.provider}'.\n` +
-        `Run 'longeragent init' to set keys, or use: /model ${parsed.provider}:${parsed.model} key=YOUR_API_KEY${envHint}`,
-      );
-    }
-
-    if (typeof config?.upsertModelRaw !== "function") {
-      throw new Error("Runtime model creation is not supported by this config object.");
-    }
-
-    const runtimeName = runtimeModelName(parsed.provider, selectionKey);
-    config.upsertModelRaw(
-      runtimeName,
-      presetModel
-        ? buildProviderPresetRawConfig(parsed.provider, presetModel, keySource)
-        : {
-            provider: parsed.provider,
-            model: resolvedModel,
-            api_key: keySource,
-          },
-    );
-    selectedConfigName = runtimeName;
-  }
-
-  selectedHint = presetModel
-    ? formatPresetSelectedHint(parsed.provider, presetModel)
-    : formatScopedModelName(parsed.provider, resolvedModel);
-  return { selectedConfigName, selectedHint };
+) {
+  return resolveModelSelectionCore(session, target, apiKey);
 }
 
 /**
@@ -736,14 +666,17 @@ function buildModelChildren(
         && item.model === currentModel
       );
     const missingApiKey = !providerHasKey.get(providerKeyGroup(provider));
+    const missingHint = provider === "openai-codex"
+      ? "not logged in: run longeragent oauth"
+      : "key missing: run longeragent init";
 
     let label = item.label;
     if (isCurrent && missingApiKey) {
-      label = `${label}  (current, key missing: run longeragent init)`;
+      label = `${label}  (current, ${missingHint})`;
     } else if (isCurrent) {
       label = `${label}  (current)`;
     } else if (missingApiKey) {
-      label = `${label}  (key missing: run longeragent init)`;
+      label = `${label}  (${missingHint})`;
     }
 
     children.push({
@@ -821,6 +754,10 @@ function modelOptions(ctx: CommandOptionsContext): CommandOption[] {
   for (const [group, envVar] of PROVIDER_ENV_VARS) {
     if (hasEnvApiKey(envVar)) providerHasKey.set(group, true);
   }
+  // OAuth: check token store for openai-codex (sync, no HTTP)
+  try {
+    if (hasOAuthTokens()) providerHasKey.set("openai-codex", true);
+  } catch { /* auth module not available */ }
   const currentProviderGroup = providerKeyGroup(currentProvider);
   if (session.primaryAgent?.modelConfig?.apiKey) {
     providerHasKey.set(currentProviderGroup, true);
@@ -964,7 +901,8 @@ async function cmdModel(ctx: CommandContext, args: string): Promise<void> {
 
   try {
     const { target, apiKey } = parseModelArgs(trimmed);
-    const { selectedConfigName, selectedHint } = resolveModelSelection(session, target, apiKey);
+    const resolvedSelection = resolveModelSelection(session, target, apiKey);
+    const { selectedConfigName, selectedHint } = resolvedSelection;
 
     // Save current session before switching
     ctx.resetUiState();
@@ -975,6 +913,12 @@ async function cmdModel(ctx: CommandContext, args: string): Promise<void> {
 
     // Switch model, then create fresh session
     session.switchModel(selectedConfigName);
+    session.setPersistedModelSelection?.({
+      modelConfigName: selectedConfigName,
+      modelProvider: resolvedSelection.modelProvider,
+      modelSelectionKey: resolvedSelection.modelSelectionKey,
+      modelId: resolvedSelection.modelId,
+    });
     session.resetForNewSession(ctx.store);
     persistGlobalPreferences(ctx);
 

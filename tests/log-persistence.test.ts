@@ -57,6 +57,9 @@ function sampleMeta(): LogSessionMeta {
   return createLogSessionMeta({
     projectPath: "/test/project",
     modelConfigName: "test-model",
+    modelProvider: "openai",
+    modelSelectionKey: "gpt-5.2",
+    modelId: "gpt-5.2",
     summary: "Test session",
     turnCount: 1,
     thinkingLevel: "default",
@@ -92,6 +95,9 @@ describe("saveLog + loadLog", () => {
     expect(loaded.meta.version).toBe(2);
     expect(loaded.meta.projectPath).toBe("/test/project");
     expect(loaded.meta.modelConfigName).toBe("test-model");
+    expect(loaded.meta.modelProvider).toBe("openai");
+    expect(loaded.meta.modelSelectionKey).toBe("gpt-5.2");
+    expect(loaded.meta.modelId).toBe("gpt-5.2");
     expect(loaded.meta.summary).toBe("Test session");
     expect(loaded.meta.turnCount).toBe(1);
     expect(loaded.meta.thinkingLevel).toBe("default");

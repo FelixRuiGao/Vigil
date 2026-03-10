@@ -87,6 +87,20 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { key: "gpt-5.4", id: "gpt-5.4", label: "GPT-5.4" },
     ],
   },
+  // ── OpenAI Codex (ChatGPT OAuth login) ──
+  // The Codex backend at chatgpt.com requires `store: false` in every request
+  // and does not support web_search_preview.
+  {
+    id: "openai-codex", name: "OpenAI (ChatGPT Login)", envVar: "_OPENAI_CODEX_OAUTH",
+    models: [
+      { key: "gpt-5.2-codex", id: "gpt-5.2-codex", label: "GPT-5.2 Codex",
+        config: { store: false, supports_web_search: false } },
+      { key: "gpt-5.3-codex", id: "gpt-5.3-codex", label: "GPT-5.3 Codex",
+        config: { store: false, supports_web_search: false } },
+      { key: "gpt-5.4", id: "gpt-5.4", label: "GPT-5.4",
+        config: { store: false, supports_web_search: false } },
+    ],
+  },
   // ── Moonshot (Kimi) — three-level: group → region/plan → model ──
   {
     id: "kimi", name: "Moonshot (Kimi) Global", envVar: "KIMI_API_KEY",

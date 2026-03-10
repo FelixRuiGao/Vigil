@@ -112,6 +112,10 @@ import {
   type LogSessionMeta,
 } from "./persistence.js";
 import {
+  resolvePersistedModelSelection,
+  type PersistedModelSelection,
+} from "./model-selection.js";
+import {
   type ResolvedSettings,
   type ContextThresholds,
   DEFAULT_THRESHOLDS,
@@ -415,6 +419,7 @@ export class Session {
   private _shellCounter = 0;
 
   // Thinking level + cache hit + accent
+  private _persistedModelSelection: PersistedModelSelection = {};
   private _preferredThinkingLevel = "default";
   private _preferredCacheHitEnabled = true;
   private _preferredAccentColor?: string;
@@ -492,6 +497,23 @@ export class Session {
     this._toolExecutors = this._buildToolExecutors();
     this._ensureCommTools();
     this._ensureSkillTool();
+    this._persistedModelSelection = this._buildPersistedModelSelection();
+  }
+
+  private _buildPersistedModelSelection(
+    overrides?: Partial<PersistedModelSelection>,
+  ): PersistedModelSelection {
+    return {
+      modelConfigName: this.currentModelConfigName || undefined,
+      modelProvider: this.primaryAgent.modelConfig.provider || undefined,
+      modelSelectionKey: this.primaryAgent.modelConfig.model || undefined,
+      modelId: this.primaryAgent.modelConfig.model || undefined,
+      ...overrides,
+    };
+  }
+
+  setPersistedModelSelection(selection: Partial<PersistedModelSelection>): void {
+    this._persistedModelSelection = this._buildPersistedModelSelection(selection);
   }
 
   // ==================================================================
@@ -1011,7 +1033,25 @@ export class Session {
     entries: LogEntry[],
     idAllocator: LogIdAllocator,
   ): void {
+    const restoredSelection = resolvePersistedModelSelection(this, {
+      modelConfigName: meta.modelConfigName || undefined,
+      modelProvider: meta.modelProvider,
+      modelSelectionKey: meta.modelSelectionKey,
+      modelId: meta.modelId,
+    });
+    const restoredModelConfig = this.config.getModel(restoredSelection.selectedConfigName);
+    const restoredThinkingPreference = meta.thinkingLevel ?? "default";
+    const restoredCachePreference = meta.cacheHitEnabled ?? true;
+
     this._resetTransientState();
+    this._applyMaxOutputTokensOverride(restoredModelConfig);
+    this.primaryAgent.replaceModelConfig(restoredModelConfig);
+    this._persistedModelSelection = this._buildPersistedModelSelection({
+      modelConfigName: restoredSelection.selectedConfigName,
+      modelProvider: restoredSelection.modelProvider,
+      modelSelectionKey: restoredSelection.modelSelectionKey,
+      modelId: restoredSelection.modelId,
+    });
 
     // Core log state
     this._log = entries;
@@ -1020,8 +1060,13 @@ export class Session {
     // Counters from meta
     this._turnCount = meta.turnCount;
     this._compactCount = meta.compactCount;
-    this._thinkingLevel = meta.thinkingLevel ?? "default";
-    this._cacheHitEnabled = meta.cacheHitEnabled ?? true;
+    this._preferredThinkingLevel = restoredThinkingPreference;
+    this._preferredCacheHitEnabled = restoredCachePreference;
+    this._thinkingLevel = this._resolveThinkingLevelForModel(
+      restoredModelConfig.model,
+      restoredThinkingPreference,
+    );
+    this._cacheHitEnabled = restoredCachePreference;
     this._createdAt = meta.createdAt || this._createdAt;
 
     // Rebuild usedContextIds from entries
@@ -1087,7 +1132,10 @@ export class Session {
       meta: createLogSessionMeta({
         createdAt: this._createdAt,
         projectPath: this._projectRoot,
-        modelConfigName: (this as any).currentModelConfigName ?? "",
+        modelConfigName: this._persistedModelSelection.modelConfigName ?? "",
+        modelProvider: this._persistedModelSelection.modelProvider,
+        modelSelectionKey: this._persistedModelSelection.modelSelectionKey,
+        modelId: this._persistedModelSelection.modelId,
         turnCount: this._turnCount,
         compactCount: this._compactCount,
         thinkingLevel: this._thinkingLevel,
@@ -1419,6 +1467,12 @@ export class Session {
     const newModelConfig = this.config.getModel(modelConfigName);
     this._applyMaxOutputTokensOverride(newModelConfig);
     this.primaryAgent.replaceModelConfig(newModelConfig);
+    this._persistedModelSelection = this._buildPersistedModelSelection({
+      modelConfigName,
+      modelProvider: newModelConfig.provider,
+      modelSelectionKey: newModelConfig.model,
+      modelId: newModelConfig.model,
+    });
     this._thinkingLevel = this._resolveThinkingLevelForModel(
       newModelConfig.model,
       this._preferredThinkingLevel,
@@ -1456,9 +1510,10 @@ export class Session {
 
   getGlobalPreferences(): GlobalTuiPreferences {
     return createGlobalTuiPreferences({
-      modelConfigName: this.currentModelConfigName || undefined,
-      modelProvider: this.primaryAgent.modelConfig.provider || undefined,
-      modelId: this.primaryAgent.modelConfig.model || undefined,
+      modelConfigName: this._persistedModelSelection.modelConfigName ?? undefined,
+      modelProvider: this._persistedModelSelection.modelProvider ?? undefined,
+      modelSelectionKey: this._persistedModelSelection.modelSelectionKey ?? undefined,
+      modelId: this._persistedModelSelection.modelId ?? undefined,
       thinkingLevel: this._preferredThinkingLevel,
       cacheHitEnabled: this._preferredCacheHitEnabled,
       accentColor: this._preferredAccentColor,
@@ -3387,9 +3442,10 @@ export class Session {
   private _readImportantLog(): string {
     const path = this._getImportantLogPath();
     if (existsSync(path)) {
-      return readFileSync(path, "utf-8");
+      const content = readFileSync(path, "utf-8").trim();
+      return content || "(empty file)";
     }
-    return "";
+    return "(empty file)";
   }
 
   private _getImportantLogPath(): string {
@@ -3492,9 +3548,9 @@ export class Session {
     }
     this._refreshSystemPromptPaths();
 
-    // Auto-create important-log.md if it doesn't exist
+    // Auto-create important-log.md if it doesn't exist (starts empty)
     const logPath = this._getImportantLogPath();
-    if (!existsSync(logPath)) writeFileSync(logPath, "# Important Log\n");
+    if (!existsSync(logPath)) writeFileSync(logPath, "");
   }
 
   private _getArtifactsDir(): string {

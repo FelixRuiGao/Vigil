@@ -95,9 +95,61 @@ function openRouterConfigName(model: ProviderPresetModel): string {
 }
 
 async function stepConfigureProvider(provider: ProviderPreset): Promise<SelectedModel[]> {
-  // API key
-  const envValue = process.env[provider.envVar];
   let apiKey: string;
+
+  // ── OpenAI Codex (OAuth) — browser or device code login ──
+  if (provider.id === "openai-codex") {
+    console.log(`  ${provider.name}: Logging in with your ChatGPT account...\n`);
+    const { browserLogin, deviceCodeLogin, saveOAuthTokens, hasOAuthTokens } = await import("./auth/openai-oauth.js");
+    if (hasOAuthTokens()) {
+      const reuse = await confirm({
+        message: "Existing OAuth login found. Use it?",
+        default: true,
+      });
+      if (!reuse) {
+        const method = await select({
+          message: "Login method",
+          choices: [
+            { name: "Browser login (recommended)", value: "browser" },
+            { name: "Device code (SSH / headless)", value: "device" },
+          ],
+        });
+        const tokens = method === "browser" ? await browserLogin() : await deviceCodeLogin();
+        saveOAuthTokens(tokens);
+        console.log("\n  Login successful!\n");
+      }
+    } else {
+      const method = await select({
+        message: "Login method",
+        choices: [
+          { name: "Browser login (recommended)", value: "browser" },
+          { name: "Device code (SSH / headless)", value: "device" },
+        ],
+      });
+      const tokens = method === "browser" ? await browserLogin() : await deviceCodeLogin();
+      saveOAuthTokens(tokens);
+      console.log("\n  Login successful!\n");
+    }
+    apiKey = "oauth:openai-codex";
+
+    // Model selection for Codex
+    const selectedModelId = await select({
+      message: `${provider.name}: Select model`,
+      choices: provider.models.map((m) => ({
+        name: m.label,
+        value: m.key,
+      })),
+    });
+    const selectedModel = provider.models.find((model) => model.key === selectedModelId)!;
+    const configName = "my-openai-codex";
+    return [{
+      configName,
+      rawConfig: buildProviderPresetRawConfig(provider.id, selectedModel, apiKey),
+    }];
+  }
+
+  // ── Standard API key providers ──
+  const envValue = process.env[provider.envVar];
 
   if (envValue) {
     const choice = await select({

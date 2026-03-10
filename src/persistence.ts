@@ -243,6 +243,7 @@ export class SessionStore {
           version: raw.version ?? 1,
           modelConfigName: raw.model_config_name ?? undefined,
           modelProvider: raw.model_provider ?? undefined,
+          modelSelectionKey: raw.model_selection_key ?? undefined,
           modelId: raw.model_id ?? undefined,
           thinkingLevel: raw.thinking_level ?? "default",
           accentColor: raw.accent_color ?? undefined,
@@ -271,6 +272,7 @@ export class SessionStore {
             version: payload.version,
             model_config_name: payload.modelConfigName ?? null,
             model_provider: payload.modelProvider ?? null,
+            model_selection_key: payload.modelSelectionKey ?? null,
             model_id: payload.modelId ?? null,
             thinking_level: payload.thinkingLevel,
             cache_hit_enabled: payload.cacheHitEnabled,
@@ -360,6 +362,9 @@ export interface LogSessionMeta {
   updatedAt: string;
   projectPath: string;
   modelConfigName: string;
+  modelProvider?: string;
+  modelSelectionKey?: string;
+  modelId?: string;
   summary: string;
   turnCount: number;
   compactCount: number;
@@ -372,6 +377,7 @@ export interface GlobalTuiPreferences {
   version: number;
   modelConfigName?: string;
   modelProvider?: string;
+  modelSelectionKey?: string;
   modelId?: string;
   thinkingLevel: string;
   cacheHitEnabled: boolean;
@@ -386,6 +392,7 @@ export function createGlobalTuiPreferences(
     version: 1,
     modelConfigName: undefined,
     modelProvider: undefined,
+    modelSelectionKey: undefined,
     modelId: undefined,
     thinkingLevel: "default",
     cacheHitEnabled: true,
@@ -403,6 +410,9 @@ export function createLogSessionMeta(
     updatedAt: "",
     projectPath: "",
     modelConfigName: "",
+    modelProvider: undefined,
+    modelSelectionKey: undefined,
+    modelId: undefined,
     summary: "",
     turnCount: 0,
     compactCount: 0,
@@ -478,6 +488,9 @@ export function saveLog(
     updated_at: meta.updatedAt,
     project_path: meta.projectPath,
     model_config_name: meta.modelConfigName,
+    model_provider: meta.modelProvider ?? null,
+    model_selection_key: meta.modelSelectionKey ?? null,
+    model_id: meta.modelId ?? null,
     summary: meta.summary,
     turn_count: meta.turnCount,
     compact_count: meta.compactCount,
@@ -510,6 +523,9 @@ export function loadLog(dir: string): LoadLogResult {
     updatedAt: raw.updated_at ?? "",
     projectPath: raw.project_path ?? "",
     modelConfigName: raw.model_config_name ?? "",
+    modelProvider: raw.model_provider ?? undefined,
+    modelSelectionKey: raw.model_selection_key ?? undefined,
+    modelId: raw.model_id ?? undefined,
     summary: raw.summary ?? "",
     turnCount: raw.turn_count ?? 0,
     compactCount: raw.compact_count ?? 0,

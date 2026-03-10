@@ -29,6 +29,7 @@ import {
   reRegisterSkillCommands,
   resolveModelSelection,
 } from "./commands.js";
+import type { PersistedModelSelection } from "./model-selection.js";
 import type { Session as TuiSession } from "./tui/types.js";
 import { setAccent } from "./tui/theme.js";
 
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
     .option("--templates <path>", "Path to agent_templates directory")
     .option("--verbose", "Enable debug logging");
 
-  // Init subcommand
+  // Subcommands
   let ranSubcommand = false;
   program
     .command("init")
@@ -79,6 +80,15 @@ async function main(): Promise<void> {
       ranSubcommand = true;
       const { runInitWizard } = await import("./init-wizard.js");
       await runInitWizard();
+    });
+
+  program
+    .command("oauth [action]")
+    .description("Manage OpenAI ChatGPT OAuth login (login/status/logout)")
+    .action(async (action?: string) => {
+      ranSubcommand = true;
+      const { oauthCommand } = await import("./auth/openai-oauth.js");
+      await oauthCommand(action);
     });
 
   // Default action — prevents Commander from showing help and exiting
@@ -140,6 +150,22 @@ async function main(): Promise<void> {
 
   // Load config
   const config = new Config({ path: configPath });
+
+  // Refresh OAuth tokens if any model uses them (before building providers)
+  const oauthEntries = config.listModelEntries().filter(
+    (e) => e.apiKeyRaw === "oauth:openai-codex",
+  );
+  if (oauthEntries.length > 0) {
+    try {
+      const { ensureFreshToken } = await import("./auth/openai-oauth.js");
+      await ensureFreshToken();
+    } catch (err) {
+      console.warn(
+        `Warning: OAuth token refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      console.warn("Run 'longeragent oauth' to re-authenticate.\n");
+    }
+  }
 
   // Load user settings (~/.longeragent/settings.json)
   const rawSettings = loadSettingsFile(paths.homeDir);
@@ -236,21 +262,39 @@ async function main(): Promise<void> {
     if (globalPreferences.modelConfigName) {
       try {
         session.switchModel(globalPreferences.modelConfigName);
+        session.setPersistedModelSelection?.({
+          modelConfigName: globalPreferences.modelConfigName,
+          modelProvider: globalPreferences.modelProvider,
+          modelSelectionKey: globalPreferences.modelSelectionKey,
+          modelId: globalPreferences.modelId,
+        } satisfies PersistedModelSelection);
       } catch {
-        if (globalPreferences.modelProvider && globalPreferences.modelId) {
+        if (globalPreferences.modelProvider && (globalPreferences.modelSelectionKey || globalPreferences.modelId)) {
           const restored = resolveModelSelection(
             session,
-            `${globalPreferences.modelProvider}:${globalPreferences.modelId}`,
+            `${globalPreferences.modelProvider}:${globalPreferences.modelSelectionKey ?? globalPreferences.modelId}`,
           );
           session.switchModel(restored.selectedConfigName);
+          session.setPersistedModelSelection?.({
+            modelConfigName: restored.selectedConfigName,
+            modelProvider: restored.modelProvider,
+            modelSelectionKey: restored.modelSelectionKey,
+            modelId: restored.modelId,
+          } satisfies PersistedModelSelection);
         }
       }
-    } else if (globalPreferences.modelProvider && globalPreferences.modelId) {
+    } else if (globalPreferences.modelProvider && (globalPreferences.modelSelectionKey || globalPreferences.modelId)) {
       const restored = resolveModelSelection(
         session,
-        `${globalPreferences.modelProvider}:${globalPreferences.modelId}`,
+        `${globalPreferences.modelProvider}:${globalPreferences.modelSelectionKey ?? globalPreferences.modelId}`,
       );
       session.switchModel(restored.selectedConfigName);
+      session.setPersistedModelSelection?.({
+        modelConfigName: restored.selectedConfigName,
+        modelProvider: restored.modelProvider,
+        modelSelectionKey: restored.modelSelectionKey,
+        modelId: restored.modelId,
+      } satisfies PersistedModelSelection);
     }
   } catch (err) {
     console.warn(

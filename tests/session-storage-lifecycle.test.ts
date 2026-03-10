@@ -23,25 +23,48 @@ function makeTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-function makeSession(projectRoot: string, store: SessionStore): Session {
-  const modelConfig = {
-    name: "test-model",
-    provider: "openai",
-    model: "gpt-5.2",
-    maxTokens: 256,
-    contextLength: 8192,
-    supportsMultimodal: false,
+function makeSession(
+  projectRoot: string,
+  store: SessionStore,
+  options?: {
+    modelConfigs?: Record<string, {
+      name: string;
+      provider: string;
+      model: string;
+      apiKey?: string;
+      maxTokens: number;
+      contextLength: number;
+      supportsMultimodal: boolean;
+    }>;
+    initialModelConfigName?: string;
+  },
+): Session {
+  const modelConfigs = options?.modelConfigs ?? {
+    "test-model": {
+      name: "test-model",
+      provider: "openai",
+      model: "gpt-5.2",
+      apiKey: "sk-test",
+      maxTokens: 256,
+      contextLength: 8192,
+      supportsMultimodal: false,
+    },
   };
+  const initialModelConfigName = options?.initialModelConfigName ?? "test-model";
+  const initialModelConfig = modelConfigs[initialModelConfigName];
+  if (!initialModelConfig) {
+    throw new Error(`Unknown initial model config '${initialModelConfigName}'.`);
+  }
 
   const primaryAgent = {
     name: "Primary",
     systemPrompt: "ROOT={PROJECT_ROOT}\nART={SESSION_ARTIFACTS}\nSYS={SYSTEM_DATA}",
     tools: [],
-    modelConfig,
+    modelConfig: { ...initialModelConfig },
     _provider: {
       budgetCalcMode: "full_context",
     },
-    replaceModelConfig(next: typeof modelConfig) {
+    replaceModelConfig(next: typeof initialModelConfig) {
       this.modelConfig = next;
     },
   } as any;
@@ -50,7 +73,36 @@ function makeSession(projectRoot: string, store: SessionStore): Session {
     pathOverrides: { projectRoot },
     subAgentModelName: undefined,
     mcpServerConfigs: [],
-    getModel: () => modelConfig,
+    getModel: (name: string) => {
+      const modelConfig = modelConfigs[name];
+      if (!modelConfig) {
+        const available = Object.keys(modelConfigs).join(", ") || "(none)";
+        throw new Error(`Model config '${name}' not found. Available: ${available}`);
+      }
+      return { ...modelConfig };
+    },
+    listModelEntries: () =>
+      Object.values(modelConfigs).map((modelConfig) => ({
+        name: modelConfig.name,
+        provider: modelConfig.provider,
+        model: modelConfig.model,
+        apiKeyRaw: modelConfig.apiKey ?? "",
+        hasResolvedApiKey: Boolean(modelConfig.apiKey),
+      })),
+    upsertModelRaw: (name: string, cfg: Record<string, unknown>) => {
+      modelConfigs[name] = {
+        name,
+        provider: String(cfg["provider"] ?? ""),
+        model: String(cfg["model"] ?? ""),
+        apiKey: String(cfg["api_key"] ?? ""),
+        maxTokens: Number(cfg["max_tokens"] ?? 32000),
+        contextLength: Number(cfg["context_length"] ?? 8192),
+        supportsMultimodal: Boolean(cfg["supports_multimodal"] ?? false),
+      };
+    },
+    get modelNames() {
+      return Object.keys(modelConfigs);
+    },
   } as any;
 
   return new Session({
@@ -81,6 +133,7 @@ describe("session storage lifecycle", () => {
         version: 1,
         modelConfigName: "my-openrouter",
         modelProvider: "openrouter",
+        modelSelectionKey: "moonshotai/kimi-k2.5",
         modelId: "moonshotai/kimi-k2.5",
         thinkingLevel: "high",
         cacheHitEnabled: false,
@@ -90,6 +143,7 @@ describe("session storage lifecycle", () => {
         expect.objectContaining({
           modelConfigName: "my-openrouter",
           modelProvider: "openrouter",
+          modelSelectionKey: "moonshotai/kimi-k2.5",
           modelId: "moonshotai/kimi-k2.5",
           thinkingLevel: "high",
           cacheHitEnabled: false,
@@ -188,6 +242,7 @@ describe("session storage lifecycle", () => {
         version: 1,
         modelConfigName: "test-model",
         modelProvider: "openai",
+        modelSelectionKey: "gpt-5.2",
         modelId: "gpt-5.2",
         thinkingLevel: "high",
         cacheHitEnabled: false,
@@ -232,6 +287,172 @@ describe("session storage lifecycle", () => {
       expect(session.lastInputTokens).toBe(7171);
       expect(session.lastTotalTokens).toBe(7510);
       expect((session as any).lastCacheReadTokens).toBe(6912);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("restores model config before thinking/cache state from log", () => {
+    const baseDir = makeTempDir("longeragent-lifecycle-base-");
+    const projectRoot = makeTempDir("longeragent-lifecycle-project-");
+    try {
+      const store = new SessionStore({ baseDir, projectPath: projectRoot });
+      const session = makeSession(projectRoot, store, {
+        modelConfigs: {
+          "test-model": {
+            name: "test-model",
+            provider: "openai",
+            model: "gpt-5.2",
+            maxTokens: 256,
+            contextLength: 8192,
+            supportsMultimodal: false,
+          },
+          "restored-model": {
+            name: "restored-model",
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            maxTokens: 512,
+            contextLength: 200000,
+            supportsMultimodal: false,
+          },
+        },
+      }) as any;
+      const entries = [createSystemPrompt("sys-001", "prompt")];
+      const idAllocator = new LogIdAllocator();
+      idAllocator.restoreFrom(entries);
+
+      session.thinkingLevel = "low";
+      session.cacheHitEnabled = true;
+
+      session.restoreFromLog(
+        createLogSessionMeta({
+          createdAt: "2026-03-05T23:55:57Z",
+          updatedAt: "2026-03-05T23:55:57Z",
+          turnCount: 1,
+          compactCount: 0,
+          projectPath: projectRoot,
+          modelConfigName: "restored-model",
+          thinkingLevel: "high",
+          cacheHitEnabled: false,
+        }),
+        entries,
+        idAllocator,
+      );
+
+      expect(session.currentModelConfigName).toBe("restored-model");
+      expect(session.currentModelName).toBe("claude-sonnet-4-5");
+      expect(session.primaryAgent.modelConfig.provider).toBe("anthropic");
+      expect(session.thinkingLevel).toBe(
+        session._resolveThinkingLevelForModel("claude-sonnet-4-5", "high"),
+      );
+      expect(session.cacheHitEnabled).toBe(false);
+      expect(session._preferredThinkingLevel).toBe("high");
+      expect(session._preferredCacheHitEnabled).toBe(false);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reconstructs runtime model configs from persisted model identity", () => {
+    const baseDir = makeTempDir("longeragent-lifecycle-base-");
+    const projectRoot = makeTempDir("longeragent-lifecycle-project-");
+    try {
+      const store = new SessionStore({ baseDir, projectPath: projectRoot });
+      const session = makeSession(projectRoot, store, {
+        modelConfigs: {
+          "test-model": {
+            name: "test-model",
+            provider: "openai",
+            model: "gpt-5.2",
+            apiKey: "sk-openai",
+            maxTokens: 256,
+            contextLength: 8192,
+            supportsMultimodal: false,
+          },
+          "kimi-key-source": {
+            name: "kimi-key-source",
+            provider: "kimi-cn",
+            model: "kimi-k2-instruct",
+            apiKey: "sk-kimi",
+            maxTokens: 256,
+            contextLength: 8192,
+            supportsMultimodal: false,
+          },
+        },
+      }) as any;
+      const entries = [createSystemPrompt("sys-001", "prompt")];
+      const idAllocator = new LogIdAllocator();
+      idAllocator.restoreFrom(entries);
+
+      session.restoreFromLog(
+        createLogSessionMeta({
+          createdAt: "2026-03-05T23:55:57Z",
+          updatedAt: "2026-03-05T23:55:57Z",
+          turnCount: 1,
+          compactCount: 0,
+          projectPath: projectRoot,
+          modelConfigName: "runtime-kimi-cn-kimi-k2-5",
+          modelProvider: "kimi-cn",
+          modelSelectionKey: "kimi-k2.5",
+          modelId: "kimi-k2.5",
+          thinkingLevel: "default",
+          cacheHitEnabled: true,
+        }),
+        entries,
+        idAllocator,
+      );
+
+      expect(session.currentModelConfigName).toBe("runtime-kimi-cn-kimi-k2-5");
+      expect(session.currentModelName).toBe("kimi-k2.5");
+      expect(session.primaryAgent.modelConfig.provider).toBe("kimi-cn");
+      expect(session.getLogForPersistence().meta).toMatchObject({
+        modelConfigName: "runtime-kimi-cn-kimi-k2-5",
+        modelProvider: "kimi-cn",
+        modelSelectionKey: "kimi-k2.5",
+        modelId: "kimi-k2.5",
+      });
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails restore without mutating the current session when model config is invalid", () => {
+    const baseDir = makeTempDir("longeragent-lifecycle-base-");
+    const projectRoot = makeTempDir("longeragent-lifecycle-project-");
+    try {
+      const store = new SessionStore({ baseDir, projectPath: projectRoot });
+      const session = makeSession(projectRoot, store) as any;
+      const originalLog = session.log;
+      const originalModelConfigName = session.currentModelConfigName;
+      const originalThinkingLevel = session.thinkingLevel;
+      const originalCacheHitEnabled = session.cacheHitEnabled;
+
+      const entries = [createSystemPrompt("sys-001", "prompt")];
+      const idAllocator = new LogIdAllocator();
+      idAllocator.restoreFrom(entries);
+
+      expect(() =>
+        session.restoreFromLog(
+          createLogSessionMeta({
+            createdAt: "2026-03-05T23:55:57Z",
+            updatedAt: "2026-03-05T23:55:57Z",
+            turnCount: 1,
+            compactCount: 0,
+            projectPath: projectRoot,
+            modelConfigName: "missing-model",
+          }),
+          entries,
+          idAllocator,
+        )
+      ).toThrow("Model config 'missing-model' not found.");
+
+      expect(session.currentModelConfigName).toBe(originalModelConfigName);
+      expect(session.thinkingLevel).toBe(originalThinkingLevel);
+      expect(session.cacheHitEnabled).toBe(originalCacheHitEnabled);
+      expect(session.log).toBe(originalLog);
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
       rmSync(projectRoot, { recursive: true, force: true });

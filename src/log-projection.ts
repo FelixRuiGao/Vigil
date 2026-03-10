@@ -692,7 +692,8 @@ function injectImportantLog(
 ): void {
   const header =
     "[IMPORTANT LOG]\n" +
-    "The following is your persistent engineering notebook:\n\n";
+    "The following is your persistent engineering notebook " +
+    "(\"(empty file)\" means the notebook is blank — it is not real content):\n\n";
   const fullContent = header + logContent;
 
   // Find position after system prompt(s)
