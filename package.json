@@ -1,9 +1,18 @@
 {
   "name": "longer-agent",
   "version": "0.1.0",
-  "description": "Multi-agent CLI with proactive context summarization",
+  "description": "A terminal AI coding agent built for long sessions — three-layer context management, persistent memory, and parallel sub-agents",
   "type": "module",
   "license": "MIT",
+  "author": "Felix Rui Gao",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FelixRuiGao/LongerAgent.git"
+  },
+  "homepage": "https://github.com/FelixRuiGao/LongerAgent",
+  "bugs": {
+    "url": "https://github.com/FelixRuiGao/LongerAgent/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -23,9 +32,11 @@
     "agent",
     "cli",
     "llm",
+    "coding-agent",
     "multi-agent",
     "context-management",
-    "summarization"
+    "summarization",
+    "terminal"
   ],
   "scripts": {
     "build": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json",
@@ -36,7 +47,7 @@
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.61.0",

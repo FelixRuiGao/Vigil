@@ -35,6 +35,9 @@ export interface TuiProjectionOptions {
   compactFoldThreshold?: number;
 }
 
+const INTERRUPTED_MARKER_TEXT = "[Interrupted here.]";
+const INTERRUPTED_MARKER_SUFFIX = ` ${INTERRUPTED_MARKER_TEXT}`;
+
 const PRIMARY_ROUND_ENTRY_TYPES = new Set<LogEntry["type"]>([
   "assistant_text",
   "reasoning",
@@ -95,6 +98,49 @@ function toConversationEntry(
   }
 
   return ce;
+}
+
+function toConversationEntries(
+  entry: LogEntry,
+  toolElapsedMap?: Map<string, number>,
+): ConversationEntry[] {
+  const ce = toConversationEntry(entry, toolElapsedMap);
+
+  if (ce.kind !== "assistant") {
+    return [ce];
+  }
+
+  if (ce.text === INTERRUPTED_MARKER_TEXT) {
+    return [
+      {
+        kind: "interrupted_marker",
+        text: INTERRUPTED_MARKER_TEXT,
+        id: ce.id,
+      },
+    ];
+  }
+
+  if (!ce.text.endsWith(INTERRUPTED_MARKER_SUFFIX)) {
+    return [ce];
+  }
+
+  const assistantText = ce.text.slice(0, -INTERRUPTED_MARKER_SUFFIX.length);
+  const entries: ConversationEntry[] = [];
+
+  if (assistantText.trim().length > 0) {
+    entries.push({
+      ...ce,
+      text: assistantText,
+    });
+  }
+
+  entries.push({
+    kind: "interrupted_marker",
+    text: INTERRUPTED_MARKER_TEXT,
+    id: ce.id ? `${ce.id}:interrupt` : undefined,
+  });
+
+  return entries;
 }
 
 function isPrimaryRoundEntry(entry: LogEntry): boolean {
@@ -198,7 +244,7 @@ function projectTuiWindow(entries: LogEntry[]): ConversationEntry[] {
           candidate.roundIndex === roundIndex &&
           PRIMARY_ROUND_ENTRY_TYPES.has(candidate.type)
         ) {
-          result.push(toConversationEntry(candidate, toolElapsedMap));
+          result.push(...toConversationEntries(candidate, toolElapsedMap));
           i++;
           continue;
         }
@@ -216,7 +262,7 @@ function projectTuiWindow(entries: LogEntry[]): ConversationEntry[] {
       flushPendingSubAgentCalls();
     }
 
-    result.push(toConversationEntry(entry, toolElapsedMap));
+    result.push(...toConversationEntries(entry, toolElapsedMap));
     i++;
   }
 

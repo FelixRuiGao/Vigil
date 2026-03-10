@@ -132,6 +132,49 @@ describe("projectToTuiEntries", () => {
     expect(tui[2].text).toContain("Compacted");
   });
 
+  it("splits interrupted assistant suffix into a dedicated TUI marker", () => {
+    const entries = [
+      createSystemPrompt("sys-001", "prompt"),
+      createUserMessage("user-001", 1, "Analyze auth.ts", "Analyze auth.ts", "c1"),
+      createAssistantText(
+        "asst-001",
+        1,
+        0,
+        "Let me check auth.ts [Interrupted here.]",
+        "Let me check auth.ts [Interrupted here.]",
+        "c2",
+      ),
+    ];
+
+    const tui = projectToTuiEntries(entries);
+    expect(tui).toEqual([
+      { kind: "user", text: "Analyze auth.ts", id: "user-001" },
+      { kind: "assistant", text: "Let me check auth.ts", id: "asst-001" },
+      { kind: "interrupted_marker", text: "[Interrupted here.]", id: "asst-001:interrupt" },
+    ]);
+  });
+
+  it("shows only the interrupted marker when no assistant text preceded it", () => {
+    const entries = [
+      createSystemPrompt("sys-001", "prompt"),
+      createUserMessage("user-001", 1, "Analyze auth.ts", "Analyze auth.ts", "c1"),
+      createAssistantText(
+        "asst-001",
+        1,
+        0,
+        "[Interrupted here.]",
+        "[Interrupted here.]",
+        "c2",
+      ),
+    ];
+
+    const tui = projectToTuiEntries(entries);
+    expect(tui).toEqual([
+      { kind: "user", text: "Analyze auth.ts", id: "user-001" },
+      { kind: "interrupted_marker", text: "[Interrupted here.]", id: "asst-001" },
+    ]);
+  });
+
   it("folds old windows when compact markers >= 3", () => {
     const entries: LogEntry[] = [
       createSystemPrompt("sys-001", "prompt"),
@@ -427,6 +470,30 @@ describe("projectToApiMessages", () => {
     expect(assistantMsg._reasoning_state).toEqual({ state: "abc" });
   });
 
+  it("keeps interrupted assistant content unchanged in API projection", () => {
+    const entries: LogEntry[] = [
+      createSystemPrompt("sys-001", "prompt"),
+      createUserMessage("user-001", 1, "Analyze auth.ts", "Analyze auth.ts", "c1"),
+      createAssistantText(
+        "asst-001",
+        1,
+        0,
+        "Let me check auth.ts [Interrupted here.]",
+        "Let me check auth.ts [Interrupted here.]",
+        "c2",
+      ),
+      createUserMessage("user-002", 2, "Continue with login.ts", "Continue with login.ts", "c3"),
+    ];
+
+    const msgs = projectToApiMessages(entries);
+    expect(msgs).toEqual([
+      { role: "system", content: "prompt" },
+      { role: "user", content: "Analyze auth.ts", _context_id: "c1" },
+      { role: "assistant", content: "Let me check auth.ts [Interrupted here.]", _context_id: "c2" },
+      { role: "user", content: "Continue with login.ts", _context_id: "c3" },
+    ]);
+  });
+
   it("handles no_reply", () => {
     const entries: LogEntry[] = [
       createSystemPrompt("sys-001", "prompt"),
@@ -503,6 +570,24 @@ describe("projectToApiMessages", () => {
     entries[3].discarded = true;
     const msgs = projectToApiMessages(entries);
     expect(msgs).toHaveLength(2); // system + user
+  });
+
+  it("keeps hidden user messages in API projection", () => {
+    const hidden = createUserMessage("user-002", 2, "hidden", "hidden", "c2");
+    hidden.tuiVisible = false;
+    hidden.displayKind = null;
+
+    const msgs = projectToApiMessages([
+      createSystemPrompt("sys-001", "prompt"),
+      createUserMessage("user-001", 1, "visible", "visible", "c1"),
+      hidden,
+    ]);
+
+    expect(msgs).toEqual([
+      { role: "system", content: "prompt" },
+      { role: "user", content: "visible", _context_id: "c1" },
+      { role: "user", content: "hidden", _context_id: "c2" },
+    ]);
   });
 
   it("handles interruption_marker as user message", () => {

@@ -27,15 +27,15 @@ export function createProvider(config: ModelConfig): BaseProvider {
     return new OpenAIChatProvider(config);
   }
 
-  if (provider === "kimi-cn" || provider === "kimi-ai" || provider === "kimi") {
+  if (provider === "kimi-cn" || provider === "kimi-ai" || provider === "kimi" || provider === "kimi-code") {
     return new KimiProvider(config);
   }
 
-  if (provider === "glm" || provider === "glm-intl") {
+  if (provider === "glm" || provider === "glm-intl" || provider === "glm-code" || provider === "glm-intl-code") {
     return new GLMProvider(config);
   }
 
-  if (provider === "minimax") {
+  if (provider === "minimax" || provider === "minimax-cn") {
     return new MiniMaxProvider(config);
   }
 
@@ -45,7 +45,7 @@ export function createProvider(config: ModelConfig): BaseProvider {
 
   throw new Error(
     `Unknown provider '${config.provider}'. ` +
-      "Supported: anthropic, openai, openai-chat, kimi-cn, kimi-ai, kimi, " +
-      "glm, glm-intl, minimax, openrouter",
+      "Supported: anthropic, openai, openai-chat, kimi, kimi-cn, kimi-ai, kimi-code, " +
+      "glm, glm-intl, glm-code, glm-intl-code, minimax, minimax-cn, openrouter",
   );
 }

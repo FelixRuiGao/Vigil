@@ -107,6 +107,7 @@ export interface Session {
 export type ConversationEntryKind =
   | "user"
   | "assistant"
+  | "interrupted_marker"
   | "progress"
   | "sub_agent_rollup"
   | "sub_agent_done"

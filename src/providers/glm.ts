@@ -14,7 +14,7 @@ export class GLMProvider extends OpenAIChatProvider {
     if (!config.baseUrl) {
       throw new Error(
         "GLM provider requires a base_url. " +
-          "Use provider 'glm' or 'glm-intl' (auto-configured) or set base_url.",
+          "Use provider 'glm', 'glm-intl', 'glm-code', or 'glm-intl-code' (auto-configured) or set base_url.",
       );
     }
     super(config);

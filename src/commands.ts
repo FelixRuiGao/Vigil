@@ -500,7 +500,11 @@ const PROVIDER_KEY_GROUP_ALIASES: Record<string, string> = {
   "openai-responses": "openai",
   "kimi-cn": "kimi",
   "kimi-ai": "kimi",
+  "kimi-code": "kimi",
   "glm-intl": "glm",
+  "glm-code": "glm",
+  "glm-intl-code": "glm",
+  "minimax-cn": "minimax",
 };
 
 function providerKeyGroup(provider: string): string {
@@ -709,8 +713,64 @@ export function resolveModelSelection(
 }
 
 /**
- * Build two-level options for /model: provider → model.
- * Each provider is a parent option with model children.
+ * Build model children (leaf-level options) for a single provider.
+ */
+function buildModelChildren(
+  provider: string,
+  byProvider: Map<string, Map<string, { model: string; label: string }>>,
+  providerHasKey: Map<string, boolean>,
+  session: any,
+  currentProvider: string,
+  currentModel: string,
+): CommandOption[] {
+  const models = Array.from((byProvider.get(provider) ?? new Map()).entries());
+  models.sort((a, b) => a[1].label.localeCompare(b[1].label));
+  const children: CommandOption[] = [];
+
+  for (const [selectionKey, item] of models) {
+    const runtimeSelectionName = runtimeModelName(provider, selectionKey);
+    const isCurrent = session.currentModelConfigName === runtimeSelectionName
+      || (
+        selectionKey === item.model
+        && provider === currentProvider
+        && item.model === currentModel
+      );
+    const missingApiKey = !providerHasKey.get(providerKeyGroup(provider));
+
+    let label = item.label;
+    if (isCurrent && missingApiKey) {
+      label = `${label}  (current, key missing: run longeragent init)`;
+    } else if (isCurrent) {
+      label = `${label}  (current)`;
+    } else if (missingApiKey) {
+      label = `${label}  (key missing: run longeragent init)`;
+    }
+
+    children.push({
+      label,
+      value: `${provider}:${selectionKey}`,
+    });
+  }
+
+  return children;
+}
+
+/** Display names for OpenRouter vendor prefixes. */
+const OPENROUTER_VENDOR_NAMES: Record<string, string> = {
+  "anthropic": "Anthropic",
+  "openai": "OpenAI",
+  "moonshotai": "Kimi",
+  "minimax": "MiniMax",
+  "z-ai": "GLM / Zhipu",
+};
+
+/**
+ * Build options for /model picker.
+ *
+ * Supports three structures:
+ * - Two-level: provider → model (for ungrouped providers like anthropic, openai)
+ * - Three-level via group field: group → sub-provider → model (kimi, glm, minimax)
+ * - Three-level via vendor prefix: openrouter → vendor → model
  */
 function modelOptions(ctx: CommandOptionsContext): CommandOption[] {
   const session = ctx.session;
@@ -766,37 +826,104 @@ function modelOptions(ctx: CommandOptionsContext): CommandOption[] {
     providerHasKey.set(currentProviderGroup, true);
   }
 
+  // Build a lookup from provider id → preset (for group metadata).
+  const presetById = new Map<string, (typeof PROVIDER_PRESETS)[number]>();
+  for (const p of PROVIDER_PRESETS) {
+    presetById.set(p.id, p);
+  }
+
   const options: CommandOption[] = [];
+  const processed = new Set<string>();
+
   for (const provider of providerOrder) {
-    const models = Array.from((byProvider.get(provider) ?? new Map()).entries());
-    models.sort((a, b) => a[1].label.localeCompare(b[1].label));
-    const children: CommandOption[] = [];
+    if (processed.has(provider)) continue;
+    processed.add(provider);
 
-    for (const [selectionKey, item] of models) {
-      const runtimeSelectionName = runtimeModelName(provider, selectionKey);
-      const isCurrent = session.currentModelConfigName === runtimeSelectionName
-        || (
-          selectionKey === item.model
-          && provider === currentProvider
-          && item.model === currentModel
+    const preset = presetById.get(provider);
+
+    // ── Three-level: grouped providers (kimi, glm, minimax) ──
+    if (preset?.group) {
+      // Collect all providers in this group (preserving providerOrder).
+      const groupMembers = providerOrder.filter((p) => {
+        const pp = presetById.get(p);
+        return pp?.group === preset.group;
+      });
+      for (const gp of groupMembers) processed.add(gp);
+
+      const subOptions: CommandOption[] = [];
+      let groupHasCurrent = false;
+
+      for (const gp of groupMembers) {
+        const gpPreset = presetById.get(gp);
+        const children = buildModelChildren(
+          gp, byProvider, providerHasKey, session, currentProvider, currentModel,
         );
-      const missingApiKey = !providerHasKey.get(providerKeyGroup(provider));
+        const subHasCurrent = children.some((c) => c.label.includes("(current)"));
+        if (subHasCurrent) groupHasCurrent = true;
 
-      let label = item.label;
-      if (isCurrent && missingApiKey) {
-        label = `${label}  (current, key missing: run longeragent init)`;
-      } else if (isCurrent) {
-        label = `${label}  (current)`;
-      } else if (missingApiKey) {
-        label = `${label}  (key missing: run longeragent init)`;
+        const subLabel = gpPreset?.subLabel ?? gp;
+        subOptions.push({
+          label: subHasCurrent ? `${subLabel}  (current)` : subLabel,
+          value: gp,
+          children,
+        });
       }
 
-      children.push({
-        label,
-        value: `${provider}:${selectionKey}`,
+      const groupLabel = preset.groupLabel ?? preset.group;
+      options.push({
+        label: groupHasCurrent ? `${groupLabel}  (current)` : groupLabel,
+        value: preset.group,
+        children: subOptions,
       });
+      continue;
     }
 
+    // ── Three-level: OpenRouter (sub-group by vendor prefix) ──
+    if (provider === "openrouter") {
+      const children = buildModelChildren(
+        provider, byProvider, providerHasKey, session, currentProvider, currentModel,
+      );
+
+      // Group children by vendor prefix (e.g. "anthropic/..." → "anthropic").
+      const vendorGroups = new Map<string, CommandOption[]>();
+      const vendorOrder: string[] = [];
+      for (const child of children) {
+        const modelKey = child.value.split(":")[1] ?? "";
+        const slashIdx = modelKey.indexOf("/");
+        const vendor = slashIdx > 0 ? modelKey.slice(0, slashIdx) : "other";
+        if (!vendorGroups.has(vendor)) {
+          vendorGroups.set(vendor, []);
+          vendorOrder.push(vendor);
+        }
+        vendorGroups.get(vendor)!.push(child);
+      }
+
+      const subOptions: CommandOption[] = [];
+      let openrouterHasCurrent = false;
+      for (const vendor of vendorOrder) {
+        const vendorChildren = vendorGroups.get(vendor)!;
+        const vendorHasCurrent = vendorChildren.some((c) => c.label.includes("(current)"));
+        if (vendorHasCurrent) openrouterHasCurrent = true;
+        const displayName = OPENROUTER_VENDOR_NAMES[vendor] ?? vendor;
+        subOptions.push({
+          label: vendorHasCurrent ? `${displayName}  (current)` : displayName,
+          value: `openrouter-${vendor}`,
+          children: vendorChildren,
+        });
+      }
+
+      options.push({
+        label: openrouterHasCurrent ? "openrouter  (current)" : "openrouter",
+        value: "openrouter",
+        children: subOptions,
+      });
+      continue;
+    }
+
+    // ── Two-level: ungrouped providers (anthropic, openai, user-defined) ──
+    const children = buildModelChildren(
+      provider, byProvider, providerHasKey, session, currentProvider, currentModel,
+    );
     const hasCurrent = children.some((c) => c.label.includes("(current)"));
     options.push({
       label: hasCurrent ? `${provider}  (current)` : provider,

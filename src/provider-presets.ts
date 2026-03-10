@@ -22,6 +22,12 @@ export interface ProviderPreset {
   name: string;
   envVar: string;
   models: ProviderPresetModel[];
+  /** Group key for three-level picker grouping. Presets with the same group are nested under a common parent. */
+  group?: string;
+  /** Display label for the group parent node in the picker (e.g. "Moonshot (Kimi)"). */
+  groupLabel?: string;
+  /** Display label for this preset within its group (middle level, e.g. "Kimi-Global"). */
+  subLabel?: string;
 }
 
 const KIMI_MODELS = [
@@ -29,9 +35,20 @@ const KIMI_MODELS = [
   { key: "kimi-k2-instruct", id: "kimi-k2-instruct", label: "Kimi K2 Instruct" },
 ] satisfies ProviderPresetModel[];
 
+const GLM_MODELS = [
+  { key: "glm-5", id: "glm-5", label: "GLM-5" },
+  { key: "glm-4.7", id: "glm-4.7", label: "GLM-4.7" },
+] satisfies ProviderPresetModel[];
+
+const MINIMAX_MODELS = [
+  { key: "MiniMax-M2.1", id: "MiniMax-M2.1", label: "MiniMax M2.1" },
+  { key: "MiniMax-M2.5", id: "MiniMax-M2.5", label: "MiniMax M2.5" },
+] satisfies ProviderPresetModel[];
+
 const ANTHROPIC_CONTEXT_1M_BETA = "context-1m-2025-08-07";
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  // ── Anthropic (no group, two-level) ──
   {
     id: "anthropic", name: "Anthropic (Claude)", envVar: "ANTHROPIC_API_KEY",
     models: [
@@ -60,6 +77,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       },
     ],
   },
+  // ── OpenAI (no group, two-level) ──
   {
     id: "openai", name: "OpenAI", envVar: "OPENAI_API_KEY",
     models: [
@@ -69,28 +87,55 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { key: "gpt-5.4", id: "gpt-5.4", label: "GPT-5.4" },
     ],
   },
+  // ── Moonshot (Kimi) — three-level: group → region/plan → model ──
   {
-    id: "kimi-cn", name: "Kimi / Moonshot (China)", envVar: "KIMI_CN_API_KEY",
+    id: "kimi", name: "Moonshot (Kimi) Global", envVar: "KIMI_API_KEY",
+    group: "kimi", groupLabel: "Moonshot (Kimi)", subLabel: "Kimi-Global",
     models: KIMI_MODELS,
   },
   {
-    id: "kimi", name: "Kimi / Moonshot (Global)", envVar: "KIMI_API_KEY",
+    id: "kimi-cn", name: "Moonshot (Kimi) China", envVar: "KIMI_CN_API_KEY",
+    group: "kimi", groupLabel: "Moonshot (Kimi)", subLabel: "Kimi-China",
     models: KIMI_MODELS,
   },
   {
-    id: "minimax", name: "MiniMax", envVar: "MINIMAX_API_KEY",
-    models: [
-      { key: "MiniMax-M2.1", id: "MiniMax-M2.1", label: "MiniMax M2.1" },
-      { key: "MiniMax-M2.5", id: "MiniMax-M2.5", label: "MiniMax M2.5" },
-    ],
+    id: "kimi-code", name: "Kimi Code (Coding Plan)", envVar: "KIMI_CODE_API_KEY",
+    group: "kimi", groupLabel: "Moonshot (Kimi)", subLabel: "Kimi-Code",
+    models: KIMI_MODELS,
+  },
+  // ── MiniMax — three-level ──
+  {
+    id: "minimax", name: "MiniMax (Global)", envVar: "MINIMAX_API_KEY",
+    group: "minimax", groupLabel: "MiniMax", subLabel: "MiniMax-Global",
+    models: MINIMAX_MODELS,
   },
   {
-    id: "glm", name: "GLM / Zhipu", envVar: "GLM_API_KEY",
-    models: [
-      { key: "glm-5", id: "glm-5", label: "GLM-5" },
-      { key: "glm-4.7", id: "glm-4.7", label: "GLM-4.7" },
-    ],
+    id: "minimax-cn", name: "MiniMax (China)", envVar: "MINIMAX_CN_API_KEY",
+    group: "minimax", groupLabel: "MiniMax", subLabel: "MiniMax-China",
+    models: MINIMAX_MODELS,
   },
+  // ── z.ai (GLM/Zhipu) — three-level ──
+  {
+    id: "glm", name: "GLM / Zhipu (China)", envVar: "GLM_API_KEY",
+    group: "glm", groupLabel: "z.ai (GLM/Zhipu)", subLabel: "GLM-China",
+    models: GLM_MODELS,
+  },
+  {
+    id: "glm-intl", name: "GLM / Zhipu (Global)", envVar: "GLM_INTL_API_KEY",
+    group: "glm", groupLabel: "z.ai (GLM/Zhipu)", subLabel: "GLM-Global",
+    models: GLM_MODELS,
+  },
+  {
+    id: "glm-code", name: "GLM / Zhipu (China Coding)", envVar: "GLM_API_KEY",
+    group: "glm", groupLabel: "z.ai (GLM/Zhipu)", subLabel: "GLM-China-Code",
+    models: GLM_MODELS,
+  },
+  {
+    id: "glm-intl-code", name: "GLM / Zhipu (Global Coding)", envVar: "GLM_INTL_API_KEY",
+    group: "glm", groupLabel: "z.ai (GLM/Zhipu)", subLabel: "GLM-Global-Code",
+    models: GLM_MODELS,
+  },
+  // ── OpenRouter (no group field; sub-grouped by vendor prefix in the picker) ──
   {
     id: "openrouter", name: "OpenRouter", envVar: "OPENROUTER_API_KEY",
     models: [

@@ -506,12 +506,16 @@ export function getBundledAssetsDir(): string {
 // ------------------------------------------------------------------
 
 const PROVIDER_URLS: Record<string, string> = {
-  "kimi-cn": "https://api.moonshot.cn/v1",
   "kimi": "https://api.moonshot.ai/v1",
+  "kimi-cn": "https://api.moonshot.cn/v1",
   "kimi-ai": "https://api.moonshot.ai/v1",
+  "kimi-code": "https://api.kimi.com/coding/v1",
   "glm": "https://open.bigmodel.cn/api/paas/v4",
   "glm-intl": "https://api.z.ai/api/paas/v4",
-  "minimax": "https://api.minimax.chat/v1",
+  "glm-code": "https://open.bigmodel.cn/api/coding/paas/v4",
+  "glm-intl-code": "https://api.z.ai/api/coding/paas/v4",
+  "minimax": "https://api.minimax.io/v1",
+  "minimax-cn": "https://api.minimaxi.com/v1",
   "openrouter": "https://openrouter.ai/api/v1",
 };
 

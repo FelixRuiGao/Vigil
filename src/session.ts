@@ -2261,16 +2261,18 @@ export class Session {
     }
     const interruptionMessage = lines.join("\n");
     const interruptionCtxId = this._allocateContextId();
-    this._appendEntry(
-      createUserMessageEntry(
-        this._nextLogId("user_message"),
-        this._turnCount,
-        interruptionMessage,
-        interruptionMessage,
-        interruptionCtxId,
-      ),
-      false,
+    const interruptionEntry = createUserMessageEntry(
+      this._nextLogId("user_message"),
+      this._turnCount,
+      interruptionMessage,
+      interruptionMessage,
+      interruptionCtxId,
     );
+    // Keep interruption recovery context for the provider, but don't surface
+    // this synthetic message in the conversation UI.
+    interruptionEntry.tuiVisible = false;
+    interruptionEntry.displayKind = null;
+    this._appendEntry(interruptionEntry, false);
   }
 
   /**

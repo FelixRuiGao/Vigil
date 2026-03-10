@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="LongerAgent" width="360" />
+  <img src="https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/logo.png" alt="LongerAgent" width="360" />
 </p>
 <p align="center">
   <strong>A terminal AI coding agent built for long sessions.</strong>
@@ -11,46 +11,15 @@
   <img alt="Author" src="https://img.shields.io/badge/author-Felix%20Rui%20Gao-4b4bf0?style=flat-square" />
 </p>
 
-Most AI agents crash, loop, or silently lose context when conversations get long. LongerAgent is built from the ground up for sessions that last hours — with a structured log architecture, three-layer context management, and persistent memory that survives across sessions.
+Most AI agents crash, loop, or silently lose context when conversations get long. LongerAgent is built from the ground up for sessions that last longer — with a structured log architecture, three-layer context management, and persistent memory that survives across sessions.
 
-![LongerAgent Terminal UI](assets/screenshot.png)
+![LongerAgent Terminal UI](https://raw.githubusercontent.com/FelixRuiGao/LongerAgent/main/assets/screenshot.png)
 
----
+https://github.com/user-attachments/assets/de1f4bc5-7f94-4226-a3cc-9a74bed69f1b
 
-## Why LongerAgent
-
-### Sessions That Actually Last
-
-Other agents hit the context window and fall apart. LongerAgent has three layers working together to keep things under control:
-
-1. **Hint Compression** — As context grows, the system prompts the agent to proactively summarize older segments
-2. **Agent-Initiated Summarization** — The agent inspects its own context distribution via `show_context` and surgically compresses selected segments with `summarize_context`, preserving key decisions and unresolved issues
-3. **Auto-Compact** — Near the limit, the system performs a full context reset with a continuation summary — the agent picks up exactly where it left off
-
-The agent also maintains an **Important Log** — a persistent engineering notebook that survives every compaction. Key discoveries, failed approaches, and architectural decisions are never lost.
-
-### Persistent Memory Across Sessions
-
-Two `AGENTS.md` files are automatically loaded on every turn:
-
-- **`~/AGENTS.md`** — Global preferences and conventions across all projects
-- **`<project>/AGENTS.md`** — Project-specific architecture insights and patterns
-
-These files persist across sessions and context resets. The agent reads them for background context and can write to them to save long-term knowledge.
-
-### Parallel Sub-Agents
-
-Spawn sub-agents from YAML call files for parallel work. Three built-in templates:
-
-- **main** — Full-capability agent with all tools
-- **explorer** — Read-only agent for codebase exploration
-- **executor** — Task-focused agent with basic tools, no orchestration overhead
-
-Sub-agents run concurrently. The main agent tracks their progress via `check_status` / `wait` and receives structured reports when they complete. The TUI shows real-time tool call timing for every operation.
-
-### Talk While It Works
-
-Type messages at any time — even while the agent is mid-task. Messages are queued and delivered at activation boundaries. The agent receives a notification so it knows when new input arrived.
+> **Platform:** macOS. Windows is not tested.
+>
+> **Security:** LongerAgent does not sandbox commands or require approval before file edits and shell execution. Use it in trusted environments and review what it does.
 
 ## Quick Start
 
@@ -65,16 +34,97 @@ longeragent init
 longeragent
 ```
 
+---
+
+## Highlights
+
+- **Three-layer context management** — sessions that last longer and longer
+- **Parallel sub-agents** — spawn workers for concurrent tasks from YAML call files
+- **Skills system** — install, manage, and create reusable skill packages by itself
+- **Persistent memory** — `AGENTS.md` files and Important Log survive across sessions and compactions
+- **Async messaging** — talk to the agent while it's mid-task
+- **7 provider families** — Anthropic, OpenAI, Kimi, MiniMax, GLM, OpenRouter, and any OpenRouter-compatible model
+
+## Usage
+
+### Context Management
+
+The agent manages its own context automatically, but you can also intervene:
+
+```text
+/summarize                                # Summarize older context segments
+/summarize Keep the auth refactor details # Summarize with specific instructions
+/compact                                  # Full context reset with continuation summary
+/compact Preserve the DB schema decisions # Compact with specific instructions
+```
+
+`/summarize` surgically compresses selected segments while preserving key decisions — use it when context is growing but you're not ready for a full reset. `/compact` is the nuclear option: full reset with a continuation summary so the agent picks up where it left off.
+
+The agent can also do both on its own via `show_context` and `summarize_context` tools — no user action needed.
+
+An **Important Log** is maintained throughout the session — key discoveries, failed approaches, and architectural decisions are written here and survive every compaction.
+
+### Sub-Agents
+
+Tell the agent to spawn sub-agents, or define tasks in a YAML call file:
+
+```yaml
+# tasks.yaml
+tasks:
+  - name: research
+    template: explorer
+    prompt: "Investigate how authentication works in this codebase"
+  - name: refactor
+    template: executor
+    prompt: "Rename all legacy API endpoints to v2"
+```
+
+Three built-in templates: **main** (full tools), **explorer** (read-only), **executor** (task-focused). Sub-agents run concurrently and report back when done.
+
+### Skills
+
+Skills are reusable tool definitions the agent can load on demand.
+
+```text
+You:   "Install skill: apple-notes"        # Agent uses built-in skill-manager
+You:   /skills                              # Toggle skills on/off with a picker
+```
+
+Create your own by adding a `SKILL.md` to `~/.longeragent/skills/<name>/`.
+
+### Persistent Memory
+
+Two `AGENTS.md` files are loaded on every turn:
+
+- **`~/AGENTS.md`** — Global preferences across all projects
+- **`<project>/AGENTS.md`** — Project-specific patterns and architecture notes
+
+The agent reads them for context and can write to them to save long-term knowledge. These persist across sessions and context resets.
+
+### Async Messaging
+
+Type messages at any time — even while the agent is working. Messages are queued and delivered at the next activation boundary.
+
+<details>
+<summary><strong>How context management works (details)</strong></summary>
+
+Three layers work together to keep context under control:
+
+1. **Hint Compression** — As context grows, the system prompts the agent to proactively summarize older segments
+2. **Agent-Initiated Summarization** — The agent inspects its own context distribution via `show_context` and surgically compresses selected segments with `summarize_context`, preserving key decisions and unresolved issues
+3. **Auto-Compact** — Near the limit, the system performs a full context reset with a continuation summary — the agent picks up exactly where it left off
+
+</details>
+
 ## Supported Providers
 
 | Provider | Models | Env Variable |
 |----------|--------|-------------|
 | **Anthropic** | Claude Haiku 4.5, Opus 4.6, Sonnet 4.6 (+ 1M context variants) | `ANTHROPIC_API_KEY` |
 | **OpenAI** | GPT-5.2, GPT-5.2 Codex, GPT-5.3 Codex, GPT-5.4 | `OPENAI_API_KEY` |
-| **Kimi / Moonshot (China)** | Kimi K2.5, K2 Instruct | `KIMI_CN_API_KEY` |
-| **Kimi / Moonshot (Global)** | Kimi K2.5, K2 Instruct | `KIMI_API_KEY` |
-| **MiniMax** | M2.1, M2.5 | `MINIMAX_API_KEY` |
-| **GLM / Zhipu** | GLM-5, GLM-4.7 | `GLM_API_KEY` |
+| **Kimi / Moonshot** | Kimi K2.5, K2 Instruct (Global, China, Coding Plan) | `KIMI_CN_API_KEY` / `KIMI_API_KEY` |
+| **MiniMax** | M2.1, M2.5 (Global, China) | `MINIMAX_API_KEY` |
+| **GLM / Zhipu** | GLM-5, GLM-4.7 (Global, China, Coding Plan) | `GLM_API_KEY` |
 | **OpenRouter** | Curated presets for Claude, GPT, Kimi, MiniMax, GLM, plus any custom model | `OPENROUTER_API_KEY` |
 
 ## Tools
@@ -101,7 +151,8 @@ longeragent
 | `/thinking` | Control thinking/reasoning depth per model |
 | `/skills` | Enable/disable skills with a checkbox picker |
 | `/resume` | Resume a previous session from its log |
-| `/compact` | Manually trigger context compaction |
+| `/summarize` | Summarize older context segments to free up space |
+| `/compact` | Full context reset with a continuation summary |
 
 ## Configuration
 

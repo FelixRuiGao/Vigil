@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   const program = new Command();
   program
     .name("longeragent")
-    .description("Multi-agent CLI with proactive context summarization")
+    .description("A terminal AI coding agent built for long sessions")
     .option("--config <path>", "Path to config.yaml")
     .option("--templates <path>", "Path to agent_templates directory")
     .option("--verbose", "Enable debug logging");

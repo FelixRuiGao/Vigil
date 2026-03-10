@@ -595,6 +595,14 @@ export function AssistantResponseView({
   );
 }
 
+export function InterruptedMarkerView({ text }: { text: string }): React.ReactElement {
+  return (
+    <Box paddingLeft={1}>
+      <Text color="yellow">{text}</Text>
+    </Box>
+  );
+}
+
 export function ProgressLineView({ text }: { text: string }): React.ReactElement {
   return (
     <Box>
@@ -793,6 +801,8 @@ export function ConversationPanel({
                 width={width}
               />
             );
+          case "interrupted_marker":
+            return <InterruptedMarkerView key={key} text={entry.text} />;
           case "progress":
             return <ProgressLineView key={key} text={entry.text} />;
           case "sub_agent_rollup":

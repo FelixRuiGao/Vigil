@@ -63,7 +63,7 @@ describe("/model command", () => {
     expect(openai!.children?.some((c) => c.label.includes("gpt-5.3-codex"))).toBe(true);
   });
 
-  it("normalizes OpenRouter child labels for display without vendor prefixes", () => {
+  it("groups OpenRouter models by vendor prefix into three-level hierarchy", () => {
     const registry = buildDefaultRegistry();
     const cmd = registry.lookup("/model");
     expect(cmd?.options).toBeTruthy();
@@ -85,12 +85,34 @@ describe("/model command", () => {
     const opts = cmd!.options!({ session });
     const openrouter = opts.find((o) => o.value === "openrouter");
     expect(openrouter).toBeTruthy();
-    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/claude-haiku-4.5"))).toBe(true);
-    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/kimi-k2.5"))).toBe(true);
-    expect(openrouter!.children?.some((c) => c.label.includes("openrouter/claude-sonnet-4.6  (1M context)"))).toBe(true);
-    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/minimax-m2.1"))).toBe(true);
-    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/gpt-5.4"))).toBe(true);
-    expect(openrouter!.children?.some((c) => c.label.startsWith("openrouter/gpt-5.3-codex"))).toBe(true);
+
+    // OpenRouter children are now vendor sub-groups.
+    const vendorAnthro = openrouter!.children?.find((c) => c.value === "openrouter-anthropic");
+    const vendorOpenAI = openrouter!.children?.find((c) => c.value === "openrouter-openai");
+    const vendorKimi = openrouter!.children?.find((c) => c.value === "openrouter-moonshotai");
+    const vendorMiniMax = openrouter!.children?.find((c) => c.value === "openrouter-minimax");
+    const vendorGLM = openrouter!.children?.find((c) => c.value === "openrouter-z-ai");
+
+    expect(vendorAnthro).toBeTruthy();
+    expect(vendorAnthro!.label).toBe("Anthropic");
+    expect(vendorAnthro!.children?.some((c) => c.label.startsWith("openrouter/claude-haiku-4.5"))).toBe(true);
+    expect(vendorAnthro!.children?.some((c) => c.label.includes("openrouter/claude-sonnet-4.6  (1M context)"))).toBe(true);
+
+    expect(vendorOpenAI).toBeTruthy();
+    expect(vendorOpenAI!.label).toBe("OpenAI");
+    expect(vendorOpenAI!.children?.some((c) => c.label.startsWith("openrouter/gpt-5.4"))).toBe(true);
+    expect(vendorOpenAI!.children?.some((c) => c.label.startsWith("openrouter/gpt-5.3-codex"))).toBe(true);
+
+    expect(vendorKimi).toBeTruthy();
+    expect(vendorKimi!.label).toBe("Kimi");
+    expect(vendorKimi!.children?.some((c) => c.label.startsWith("openrouter/kimi-k2.5"))).toBe(true);
+
+    expect(vendorMiniMax).toBeTruthy();
+    expect(vendorMiniMax!.label).toBe("MiniMax");
+    expect(vendorMiniMax!.children?.some((c) => c.label.startsWith("openrouter/minimax-m2.1"))).toBe(true);
+
+    expect(vendorGLM).toBeTruthy();
+    expect(vendorGLM!.label).toBe("GLM / Zhipu");
   });
 
   it("blocks switching to provider:model when provider API key is missing", async () => {

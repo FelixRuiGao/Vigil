@@ -39,7 +39,7 @@ export class MiniMaxProvider extends OpenAIChatProvider {
     if (!config.baseUrl) {
       throw new Error(
         "MiniMax provider requires a base_url. " +
-          "Use provider 'minimax' (auto-configured) or set base_url.",
+          "Use provider 'minimax' or 'minimax-cn' (auto-configured) or set base_url.",
       );
     }
     super(config);

@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Session } from "../src/session.js";
 import { SessionStore } from "../src/persistence.js";
 import { createLogSessionMeta, loadLog, saveLog } from "../src/persistence.js";
+import { projectToApiMessages, projectToTuiEntries } from "../src/log-projection.js";
 import {
   LogIdAllocator,
   createAssistantText,
@@ -489,6 +490,22 @@ describe("session storage lifecycle", () => {
       expect(String(interruptionUser.display)).toContain("Last turn was interrupted by the user.");
       expect(String(interruptionUser.display)).toContain("Active sub-agents were killed.");
       expect(String(interruptionUser.display)).toContain("[Snapshot]");
+      expect(interruptionUser.tuiVisible).toBe(false);
+      expect(interruptionUser.displayKind).toBeNull();
+
+      const tuiEntries = projectToTuiEntries(log);
+      expect(tuiEntries.some((entry) => entry.text.includes("Last turn was interrupted by the user."))).toBe(false);
+      expect(tuiEntries).toEqual([
+        { kind: "tool_call", text: "edit_file src/a.ts", id: "tc-001", startedAt: expect.any(Number), elapsedMs: expect.any(Number) },
+        { kind: "assistant", text: "partial", id: "as-001" },
+        { kind: "interrupted_marker", text: "[Interrupted here.]", id: "as-001:interrupt" },
+      ]);
+
+      const apiMessages = projectToApiMessages(log);
+      expect(apiMessages.at(-1)).toMatchObject({
+        role: "user",
+        content: expect.stringContaining("Last turn was interrupted by the user."),
+      });
       expect((session as any)._interruptSnapshot).toBeNull();
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
