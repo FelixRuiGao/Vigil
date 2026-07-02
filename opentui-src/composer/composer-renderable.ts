@@ -31,7 +31,15 @@ import {
   measureColumns,
 } from "./graphemes.js";
 import { FermiComposerModel, type ComposerToken, type ComposerTokenKind, type TokenSpec } from "./model.js";
-import { cursorToVisual, layout, visualLineCount, visualToCursor, type Affinity, type Layout } from "./layout.js";
+import {
+  cursorToVisual,
+  deleteToVisualLineStartRange,
+  layout,
+  visualLineCount,
+  visualToCursor,
+  type Affinity,
+  type Layout,
+} from "./layout.js";
 
 export interface FermiComposerOptions extends RenderableOptions<any> {
   textColor?: ColorInput;
@@ -603,7 +611,7 @@ export class FermiComposerRenderable extends Renderable {
    * Delete to the start of the current VISUAL line — a faithful port of the
    * app's getDeleteToVisualLineStartAction + Textarea.deleteToLineStart:
    *   - caret mid-line            → delete from the visual line start to caret
-   *   - caret at a wrapped-row start → clear the whole logical-line prefix
+   *   - caret at a wrapped-row start → delete the previous visual row
    *   - caret at a logical line start → join with the previous line
    * (Cmd+Backspace / Ctrl+U route here from the app's useKeyboard handler.)
    */
@@ -612,30 +620,17 @@ export class FermiComposerRenderable extends Renderable {
       this._model.deleteBackward();
       return;
     }
-    const lay = this._ensureLayout();
-    const cursor = this._model.cursor;
-    const visualStart = lay.lines[cursorToVisual(lay, cursor, "before").row]!.startIndex;
-    if (cursor > visualStart) {
-      this._model.deleteRange(visualStart, cursor);
-      return;
-    }
-    const logicalStart = this._logicalLineStartIndex(cursor);
-    if (logicalStart < cursor) {
-      this._model.deleteRange(logicalStart, cursor);
-    } else if (cursor > 0) {
-      this._model.deleteRange(cursor - 1, cursor);
-    }
+    const range = deleteToVisualLineStartRange(
+      this._ensureLayout(),
+      this._model.graphemes,
+      this._model.cursor,
+    );
+    if (range) this._model.deleteRange(range.start, range.end);
   }
 
   /** Kept for API compatibility; prefer deleteToVisualLineStart(). */
   deleteToLineStart(): void {
     this.deleteToVisualLineStart();
-  }
-
-  private _logicalLineStartIndex(index: number): number {
-    const g = this._model.graphemes;
-    for (let i = index - 1; i >= 0; i--) if (g[i] === "\n") return i + 1;
-    return 0;
   }
 
   gotoVisualLineHome(opts: { select?: boolean } = {}): void {
@@ -711,13 +706,11 @@ export class FermiComposerRenderable extends Renderable {
     return this._model.serializeSubmitText();
   }
 
-  // Minimal extmark-shaped shim so existing reset paths (clearInput) keep working.
-  readonly extmarks = {
-    clear: (): void => {
-      this._model.clear();
-      this._pasteCounter.reset();
-    },
-  };
+  /** Clear text, tokens and paste numbering — the app's input-reset path. */
+  clearContent(): void {
+    this._model.clear();
+    this._pasteCounter.reset();
+  }
 
   // Dynamic props applied by the reconciler via setProperty (instance[key]=v).
   set placeholder(value: string) {

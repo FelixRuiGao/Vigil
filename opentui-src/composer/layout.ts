@@ -239,6 +239,41 @@ export function visualToCursor(layout: Layout, row: number, col: number): number
   return line.endIndex;
 }
 
+/**
+ * Grapheme range removed by "delete to visual line start" — the decision table
+ * behind Cmd+Backspace / Ctrl+U (Docs/composer-rewrite.md §10 C):
+ *   - caret mid-visual-line          → delete from the visual line start
+ *   - caret at a wrapped-row start   → delete the previous visual row
+ *     (affinity "before" folds this into the mid-line case)
+ *   - caret at a logical line start  → join: delete the preceding newline
+ *   - caret at the very start        → nothing (null)
+ */
+export function deleteToVisualLineStartRange(
+  layout: Layout,
+  graphemes: readonly string[],
+  cursor: number,
+): { start: number; end: number } | null {
+  if (cursor <= 0) return null;
+  // The decision is keyed on the DISPLAYED position: "before" affinity folds a
+  // clean soft-wrap boundary into the end of the previous row.
+  const pos = cursorToVisual(layout, cursor, "before");
+  if (pos.col > 0) {
+    // Displayed mid-row → delete from the displayed row's start.
+    return { start: layout.lines[pos.row]!.startIndex, end: cursor };
+  }
+  if (graphemes[cursor - 1] === "\n") {
+    // Logical line start → join: delete the preceding newline.
+    return { start: cursor - 1, end: cursor };
+  }
+  if (pos.row > 0) {
+    // Wrapped-row start (anything between the row's startIndex and the caret
+    // was dropped at the wrap, e.g. a collapsed space run) → clear the
+    // previous visual row, matching the native decision table.
+    return { start: layout.lines[pos.row - 1]!.startIndex, end: cursor };
+  }
+  return { start: 0, end: cursor };
+}
+
 /** Total visual line count for a given width (for self-sizing the box). */
 export function visualLineCount(
   graphemes: readonly string[],

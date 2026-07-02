@@ -17,7 +17,6 @@ import { projectQueuedInputs } from "../src/log-projection.js";
 import { isCommandExitSignal } from "../src/commands.js";
 import { ProgressReporter, type ProgressEvent } from "../src/progress.js";
 import { scanCandidates } from "../src/file-attach.js";
-import { classifyPastedText, TurnPasteCounter } from "../src/ui/input/paste.js";
 import { readClipboardImage } from "../src/clipboard-image.js";
 import { processImage, type ProcessedImage } from "../src/image-compress.js";
 import { getUpdateState, triggerRelaunch } from "../src/update-check.js";
@@ -59,9 +58,7 @@ import {
 } from "../src/ui/checkbox-picker.js";
 import {
   type InputRenderable,
-  type KeyBinding,
   type ScrollBoxRenderable,
-  type TextareaRenderable,
 } from "@opentui/core";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import "./forked/patch-opentui-markdown.js";
@@ -99,18 +96,10 @@ import {
 } from "../src/auth/github-copilot-oauth.js";
 import {
   buildFileReferenceLabel,
-  createComposerTokenVisuals,
   displayWidthWithNewlines,
-  ensureComposerTokenType,
   findFileReferenceQuery,
-  getComposerTokenSnapshots,
-  getTextDiffRange,
-  patchComposerExtmarksForDisplayWidth,
-  replaceRangeWithComposerToken,
-  serializeComposerText,
-  type ComposerTokenVisuals,
-} from "./composer-tokens.js";
-import { asFermiComposer, isFermiComposer } from "./composer/composer-renderable.js";
+} from "./composer-token-logic.js";
+import type { FermiComposerRenderable } from "./composer/composer-renderable.js";
 import { createDisplayTheme, type DisplayTheme, type DisplayThemeTokens, type DeepPartial, type ThemeMode } from "./display/theme/index.js";
 import { ContextUsageCard, CodexUsageCard } from "./display/panels/usage-cards.js";
 import { StatusPanel } from "./display/panels/status-panel.js";
@@ -129,7 +118,6 @@ import {
 import { clamp, computePickerMaxVisible } from "./display/layout/metrics.js";
 import { OpenTuiScreen } from "./display/layout/open-tui-screen.js";
 import { resolveModelNameColor } from "./display/utils/model.js";
-import { getDeleteToVisualLineStartAction } from "./input/delete-to-visual-line-start.js";
 import { appendPromptHistory, getPromptHistoryNavigationDirection, navigatePromptHistory } from "./input/prompt-history.js";
 
 export interface OpenTuiAppProps {
@@ -175,21 +163,6 @@ const GOODBYE_MESSAGES = [
 ] as const;
 
 const ASSISTANT_RENDERER_MODE = getFermiAssistantRenderer();
-
-const DISABLED_TEXTAREA_ACTION = "__disabled__" as unknown as KeyBinding["action"];
-
-const COMPOSER_KEY_BINDINGS: KeyBinding[] = [
-  { name: "return", action: "submit" },
-  { name: "linefeed", action: "submit" },
-  { name: "return", shift: true, action: "newline" },
-  { name: "return", meta: true, action: "newline" },
-  { name: "n", ctrl: true, action: "newline" },
-  { name: "up", action: DISABLED_TEXTAREA_ACTION },
-  { name: "down", action: DISABLED_TEXTAREA_ACTION },
-  { name: "backspace", meta: true, action: DISABLED_TEXTAREA_ACTION },
-  { name: "backspace", super: true, action: DISABLED_TEXTAREA_ACTION },
-  { name: "u", ctrl: true, action: DISABLED_TEXTAREA_ACTION },
-];
 
 function isDeleteToVisualLineStartShortcut(
   event: {
@@ -571,7 +544,7 @@ export function OpenTuiApp({
   // currently visible scrollbox.
   const mainScrollRef = useRef<ScrollBoxRenderable>(null);
   const detailScrollRef = useRef<ScrollBoxRenderable>(null);
-  const inputRef = useRef<TextareaRenderable | null>(null);
+  const inputRef = useRef<FermiComposerRenderable | null>(null);
   const promptSecretInputRef = useRef<InputRenderable | null>(null);
   const askInputRef = useRef<InputRenderable | null>(null);
   const lastInputValueRef = useRef("");
@@ -585,25 +558,16 @@ export function OpenTuiApp({
   // input/prompt-history.ts. The app-level key handler only decides whether an
   // ↑/↓ key is at the absolute composer boundary or should be normal cursor
   // movement within the current recalled/draft text.
-  const pasteCounterRef = useRef(new TurnPasteCounter());
   const imageCounterRef = useRef(0);
   const draftImagesRef = useRef(new Map<string, ProcessedImage & { id: string; index: number }>());
-  const maybeCollapseLargePasteRef = useRef<(previousValue: string, nextValue: string) => boolean>(() => false);
   const updateInputOverlayRef = useRef<(value: string, cursorOffset: number) => void>(() => { });
-  const composerTokenVisualsRef = useRef<ComposerTokenVisuals | null>(null);
   const promptSelectResolverRef = useRef<((value: string | undefined) => void) | null>(null);
   const promptSecretResolverRef = useRef<((value: string | undefined) => void) | null>(null);
   const commandPickerResolverRef = useRef<((value: CommandPickerResult | undefined) => void) | null>(null);
   const pickerNoteInputRef = useRef<InputRenderable | null>(null);
   const [pickerNoteValue, setPickerNoteValue] = useState("");
   const colors = theme.colors;
-  const composerTokenColorsRef = useRef(colors);
   const markdownStyle = theme.markdownStyle;
-  if (!composerTokenVisualsRef.current || composerTokenColorsRef.current !== colors) {
-    composerTokenColorsRef.current = colors;
-    composerTokenVisualsRef.current = createComposerTokenVisuals(colors);
-  }
-  const composerTokenVisuals = composerTokenVisualsRef.current;
 
   // Bind markdown render colors (codeBorder/codeFg/HLJS) to the live theme so
   // mode switches reflect immediately on the next markdown render.
@@ -1024,14 +988,11 @@ export function OpenTuiApp({
     const previousValue = lastInputValueRef.current;
     const nextValue = composer.plainText;
     if (previousValue !== nextValue) {
-      maybeCollapseLargePasteRef.current(previousValue, nextValue);
       // Prune draft images whose composer token was deleted
       if (draftImagesRef.current.size > 0) {
-        const fermi = asFermiComposer(composer);
-        const tokens = fermi
-          ? fermi.tokens
-          : getComposerTokenSnapshots(composer, ensureComposerTokenType(composer));
-        const liveImageIds = new Set(tokens.filter((t) => t.kind === "image" && t.imageId).map((t) => t.imageId));
+        const liveImageIds = new Set(
+          composer.tokens.filter((t) => t.kind === "image" && t.imageId).map((t) => t.imageId),
+        );
         for (const id of draftImagesRef.current.keys()) {
           if (!liveImageIds.has(id)) draftImagesRef.current.delete(id);
         }
@@ -1055,7 +1016,6 @@ export function OpenTuiApp({
   }, [syncComposerState]);
 
   const clearInput = useCallback(() => {
-    pasteCounterRef.current.reset();
     lastInputValueRef.current = "";
     setDraftValue("");
 
@@ -1063,7 +1023,7 @@ export function OpenTuiApp({
     setCommandPicker(null);
     setCheckboxPicker(null);
     if (inputRef.current) {
-      inputRef.current.extmarks.clear();
+      inputRef.current.clearContent();
       inputRef.current.setText("");
     }
   }, []);
@@ -1305,7 +1265,7 @@ export function OpenTuiApp({
   }, [copyOnSelect, renderer, flashCopyToast, showHint]);
 
   useEffect(() => {
-    const composer = asFermiComposer(inputRef.current);
+    const composer = inputRef.current;
     if (composer) composer.onSelectionCopy = handleComposerSelectionCopy;
   }, [handleComposerSelectionCopy]);
 
@@ -1570,53 +1530,13 @@ export function OpenTuiApp({
   updateInputOverlayRef.current = updateInputOverlay;
 
   const resetTurnPasteState = useCallback(() => {
-    pasteCounterRef.current.reset();
     imageCounterRef.current = 0;
     draftImagesRef.current.clear();
   }, []);
 
-  const maybeCollapseLargePaste = useCallback((previousValue: string, nextValue: string): boolean => {
-    const composer = inputRef.current;
-    if (!composer || suppressComposerSyncRef.current) return false;
-    // The self-written composer collapses large pastes into tokens through its
-    // own model (not the extmark layer), so skip the native collapse path here.
-    if (isFermiComposer(composer)) return false;
-
-    const diff = getTextDiffRange(previousValue, nextValue);
-    if (!diff || !diff.insertedText) return false;
-
-    const decision = classifyPastedText(diff.insertedText, pasteCounterRef.current);
-    if (!decision.replacedWithPlaceholder || decision.index === undefined) return false;
-
-    suppressComposerSyncRef.current = true;
-    try {
-      replaceRangeWithComposerToken(composer, {
-        rangeStart: diff.startOffset,
-        rangeEnd: diff.endAfterOffset,
-        label: decision.text,
-        metadata: {
-          kind: "paste",
-          label: decision.text,
-          submitText: diff.insertedText,
-          index: decision.index,
-          lineCount: decision.lineCount,
-        },
-        styleId: composerTokenVisuals.pasteStyleId,
-      });
-    } finally {
-      suppressComposerSyncRef.current = false;
-    }
-
-    return true;
-  }, [composerTokenVisuals.pasteStyleId]);
-  maybeCollapseLargePasteRef.current = maybeCollapseLargePaste;
-
   useEffect(() => {
     const composer = inputRef.current;
     if (!composer) return;
-    // The self-written composer manages tokens in its own model; the extmark
-    // monkeypatch is native-only.
-    if (!isFermiComposer(composer)) patchComposerExtmarksForDisplayWidth(composer);
 
     const pendingTimers: ReturnType<typeof setTimeout>[] = [];
     const sync = () => {
@@ -1925,9 +1845,7 @@ export function OpenTuiApp({
   const getSerializedComposerInput = useCallback((): string => {
     const composer = inputRef.current;
     if (!composer) return draftValue;
-    const fermiComposer = asFermiComposer(composer);
-    if (fermiComposer) return fermiComposer.serializeSubmitText();
-    return serializeComposerText(composer, ensureComposerTokenType(composer));
+    return composer.serializeSubmitText();
   }, [draftValue]);
 
   // Commands that run regardless of streaming state. /copy is here so its
@@ -1980,7 +1898,7 @@ export function OpenTuiApp({
       if (command?.options && startCommandPicker(input)) {
         appendPromptHistory(input);
         if (inputRef.current) {
-          inputRef.current.extmarks.clear();
+          inputRef.current.clearContent();
           inputRef.current.setText("");
         }
         resetTurnPasteState();
@@ -2128,32 +2046,15 @@ export function OpenTuiApp({
       const label = buildFileReferenceLabel(selectedValue);
       suppressComposerSyncRef.current = true;
       try {
-        const fermiComposer = asFermiComposer(composer);
-        if (fermiComposer) {
-          fermiComposer.replaceRangeWithToken({
-            rangeStart: query.startOffset,
-            rangeEnd: query.endOffset,
-            label,
-            submitText: label,
-            kind: "file",
-            path: selectedValue,
-            trailingText: " ",
-          });
-        } else {
-          replaceRangeWithComposerToken(composer, {
-            rangeStart: query.startOffset,
-            rangeEnd: query.endOffset,
-            label,
-            metadata: {
-              kind: "file",
-              label,
-              submitText: label,
-              path: selectedValue,
-            },
-            styleId: composerTokenVisuals.fileStyleId,
-            trailingText: " ",
-          });
-        }
+        composer.replaceRangeWithToken({
+          rangeStart: query.startOffset,
+          rangeEnd: query.endOffset,
+          label,
+          submitText: label,
+          kind: "file",
+          path: selectedValue,
+          trailingText: " ",
+        });
       } finally {
         suppressComposerSyncRef.current = false;
       }
@@ -2168,7 +2069,7 @@ export function OpenTuiApp({
     if (command?.options && startCommandPicker(selectedValue)) {
       if (inputRef.current) {
         inputRef.current.setText("");
-        inputRef.current.extmarks.clear();
+        inputRef.current.clearContent();
       }
       resetTurnPasteState();
       lastInputValueRef.current = "";
@@ -2181,7 +2082,6 @@ export function OpenTuiApp({
   }, [
     commandOverlay,
     commandRegistry,
-    composerTokenVisuals.fileStyleId,
     handleSubmit,
     resetTurnPasteState,
     startCommandPicker,
@@ -2293,7 +2193,7 @@ export function OpenTuiApp({
     if (command?.options && startCommandPicker(selectedValue)) {
       if (inputRef.current) {
         inputRef.current.setText("");
-        inputRef.current.extmarks.clear();
+        inputRef.current.clearContent();
       }
       resetTurnPasteState();
       lastInputValueRef.current = "";
@@ -2324,64 +2224,18 @@ export function OpenTuiApp({
   const deleteToVisualLineStart = useCallback(() => {
     const composer = inputRef.current;
     if (!composer) return;
-
-    // The self-written composer owns the full visual-line-start decision table
-    // (wrapped rows, col-0 join, preserve-empty-last-line) in its renderable.
-    const fermiComposer = asFermiComposer(composer);
-    if (fermiComposer) {
-      fermiComposer.deleteToVisualLineStart();
-      syncComposerState();
-      return;
-    }
-
-    if (composer.hasSelection()) {
-      composer.deleteCharBackward();
-      syncComposerState();
-      return;
-    }
-
-    const cursor = composer.editorView.getCursor();
-    const visualStart = composer.editorView.getVisualSOL();
-    const action = getDeleteToVisualLineStartAction(cursor, visualStart);
-
-    if (action === "noop") {
-      return;
-    }
-
-    if (action === "delete-to-line-start") {
-      composer.deleteToLineStart();
-      syncComposerState();
-      return;
-    }
-
-    composer.gotoVisualLineHome({ select: true });
-    if (composer.hasSelection()) {
-      composer.deleteCharBackward();
-    }
+    // The composer owns the full visual-line-start decision table (wrapped
+    // rows, col-0 join, preserve-empty-last-line) in its renderable.
+    composer.deleteToVisualLineStart();
     syncComposerState();
   }, [syncComposerState]);
 
   const isAtFirstVisualLine = useCallback((): boolean => {
-    const composer = inputRef.current;
-    if (!composer) return false;
-    const fermiComposer = asFermiComposer(composer);
-    if (fermiComposer) return fermiComposer.isAtFirstVisualLine();
-    const visualStart = composer.editorView.getVisualSOL();
-    return visualStart.logicalRow === 0 && visualStart.logicalCol === 0;
+    return inputRef.current?.isAtFirstVisualLine() ?? false;
   }, []);
 
   const isAtLastVisualLine = useCallback((): boolean => {
-    const composer = inputRef.current;
-    if (!composer) return false;
-    const fermiComposer = asFermiComposer(composer);
-    if (fermiComposer) return fermiComposer.isAtLastVisualLine();
-    const lineCount = composer.lineCount || composer.editBuffer.getLineCount();
-    const visualEnd = composer.editorView.getVisualEOL();
-    const logicalEnd = composer.editBuffer.getEOL();
-    return (
-      visualEnd.logicalRow === Math.max(0, lineCount - 1) &&
-      visualEnd.logicalCol === logicalEnd.col
-    );
+    return inputRef.current?.isAtLastVisualLine() ?? false;
   }, []);
 
   const moveComposerVertically = useCallback((direction: "up" | "down") => {
@@ -2990,33 +2844,15 @@ export function OpenTuiApp({
           if (cmp) {
             suppressComposerSyncRef.current = true;
             try {
-              const fermiCmp = asFermiComposer(cmp);
-              if (fermiCmp) {
-                fermiCmp.replaceRangeWithToken({
-                  rangeStart: cmp.cursorOffset,
-                  rangeEnd: cmp.cursorOffset,
-                  label,
-                  submitText: label,
-                  kind: "image",
-                  imageId,
-                  trailingText: " ",
-                });
-              } else {
-                replaceRangeWithComposerToken(cmp, {
-                  rangeStart: cmp.cursorOffset,
-                  rangeEnd: cmp.cursorOffset,
-                  label,
-                  metadata: {
-                    kind: "image",
-                    label,
-                    submitText: label,
-                    imageId,
-                    index: idx,
-                  },
-                  styleId: composerTokenVisuals.imageStyleId,
-                  trailingText: " ",
-                });
-              }
+              cmp.replaceRangeWithToken({
+                rangeStart: cmp.cursorOffset,
+                rangeEnd: cmp.cursorOffset,
+                label,
+                submitText: label,
+                kind: "image",
+                imageId,
+                trailingText: " ",
+              });
             } finally {
               suppressComposerSyncRef.current = false;
             }
@@ -3260,7 +3096,7 @@ export function OpenTuiApp({
       const restored = session.restoreQueuedUserInput?.() ?? null;
       queuedInputsRef.current = projectQueuedInputs([...(session.log ?? [])]);
       if (restored !== null) {
-        composer.extmarks.clear();
+        composer.clearContent();
         composer.setText(restored);
         composer.cursorOffset = displayWidthWithNewlines(restored);
         syncComposerState();
@@ -3279,7 +3115,7 @@ export function OpenTuiApp({
     // entries keep the current history position but are dropped on the next
     // history navigation.
     const applyRecall = (recalled: string, cursor: number): void => {
-      composer.extmarks.clear();
+      composer.clearContent();
       composer.setText(recalled);
       composer.cursorOffset = cursor;
       syncComposerState();
@@ -3522,8 +3358,6 @@ export function OpenTuiApp({
       modelColor={effectiveModelColor}
       turnElapsed={effectiveElapsed}
       hint={hint}
-      composerTokenVisuals={composerTokenVisuals}
-      keyBindings={COMPOSER_KEY_BINDINGS}
       onSubmit={() => {
         if (selectedChildId) {
           showHint("Return to the primary session to send messages.");

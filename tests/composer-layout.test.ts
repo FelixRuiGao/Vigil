@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 
 import { segmentGraphemes } from "../opentui-src/composer/graphemes.js";
 import { FermiComposerModel } from "../opentui-src/composer/model.js";
-import { cursorToVisual, layout, visualToCursor } from "../opentui-src/composer/layout.js";
+import {
+  cursorToVisual,
+  deleteToVisualLineStartRange,
+  layout,
+  visualToCursor,
+} from "../opentui-src/composer/layout.js";
 
 function lay(text: string, width: number, tokens = []) {
   return layout(segmentGraphemes(text), tokens, width);
@@ -68,6 +73,38 @@ describe("layout — cursor <-> visual mapping", () => {
     expect(cursorToVisual(l, 6)).toEqual({ row: 1, col: 0 });
     expect(cursorToVisual(l, 5, "after")).toEqual({ row: 1, col: 0 });
     expect(cursorToVisual(l, 5, "before")).toEqual({ row: 0, col: 5 });
+  });
+});
+
+describe("layout — delete-to-visual-line-start decision table", () => {
+  function range(text: string, width: number, cursor: number) {
+    return deleteToVisualLineStartRange(lay(text, width), segmentGraphemes(text), cursor);
+  }
+
+  it("deletes from the visual line start when the caret is mid-line", () => {
+    expect(range("hello", 80, 3)).toEqual({ start: 0, end: 3 });
+    expect(range("ab\ncdef", 80, 5)).toEqual({ start: 3, end: 5 }); // mid second line
+  });
+
+  it("joins with the previous line at a logical line start (deletes the newline)", () => {
+    expect(range("ab\ncd", 80, 3)).toEqual({ start: 2, end: 3 });
+  });
+
+  it("joins even when the previous line is empty (preserved empty line)", () => {
+    expect(range("ab\n\ncd", 80, 4)).toEqual({ start: 3, end: 4 });
+  });
+
+  it("does nothing at the very start", () => {
+    expect(range("hello", 80, 0)).toBeNull();
+    expect(range("", 80, 0)).toBeNull();
+  });
+
+  it("deletes the previous visual row at a wrapped-row start", () => {
+    // "hello world" @5 wraps to ["hello","world"]; caret before "world" is a
+    // wrapped-row start (logical col > 0) → delete the previous visual row.
+    const text = "hello world";
+    const wrapStart = 6; // grapheme index of 'w'
+    expect(range(text, 5, wrapStart)).toEqual({ start: 0, end: wrapStart });
   });
 });
 

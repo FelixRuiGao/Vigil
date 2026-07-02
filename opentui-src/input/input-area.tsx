@@ -2,17 +2,14 @@
 
 import React from "react";
 
-import { createTextAttributes, type KeyBinding, type TextareaRenderable } from "@opentui/core";
+import { createTextAttributes } from "@opentui/core";
 
 // Side-effect import: registers the <fermiComposer> intrinsic element + JSX types.
 import "../composer/composer-element.js";
 
 const ATTRS_BOLD = createTextAttributes({ bold: true });
-
-/** Opt-in flag for the self-written composer (default: native textarea). */
-const USE_FERMI_COMPOSER = process.env.FERMI_COMPOSER === "fermi";
+import type { FermiComposerRenderable } from "../composer/composer-renderable.js";
 import type { ConversationPalette } from "../components/conversation-types.js";
-import type { ComposerTokenVisuals } from "../composer-tokens.js";
 import type { ActivityPhase } from "../display/types.js";
 import { formatCompactTokensShort } from "../display/utils/format.js";
 import { formatElapsed } from "../presentation/use-turn-timer.js";
@@ -25,7 +22,7 @@ import {
 } from "../presentation/use-spinner.js";
 
 interface InputAreaProps {
-  inputRef: React.RefObject<TextareaRenderable | null>;
+  inputRef: React.RefObject<FermiComposerRenderable | null>;
   processing: boolean;
   pendingAsk: boolean;
   selectedChildId: string | null;
@@ -52,8 +49,6 @@ interface InputAreaProps {
   contentWidth: number;
   colors: ConversationPalette;
   maxInputLines: number;
-  composerTokenVisuals: ComposerTokenVisuals;
-  keyBindings: readonly KeyBinding[];
   onSubmit: () => void;
   onModelClick: () => void;
   onPermissionClick?: () => void;
@@ -135,8 +130,6 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
     contentWidth,
     colors,
     maxInputLines,
-    composerTokenVisuals,
-    keyBindings,
     onSubmit,
     onModelClick,
     onPermissionClick,
@@ -277,45 +270,22 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
         paddingRight={1}
       >
         <text fg="#d4d4d4" attributes={ATTRS_BOLD} content="❯ " flexShrink={0} />
-        {USE_FERMI_COMPOSER ? (
-          <fermiComposer
-            ref={(node: any) => {
-              (inputRef as any).current = node;
-            }}
-            focused={focused}
-            placeholder={placeholder}
-            textColor={selectedChildId ? colors.muted : colors.text}
-            placeholderColor={colors.muted}
-            tokenColor={colors.accent}
-            cursorColor="#ffffff"
-            flexGrow={1}
-            minHeight={1}
-            maxHeight={maxInputLines}
-            maxLines={maxInputLines}
-            onSubmit={onSubmit}
-          />
-        ) : (
-          <textarea
-            ref={(node: any) => {
-              (inputRef as any).current = node;
-            }}
-            placeholder={placeholder}
-            focused={focused}
-            textColor={selectedChildId ? colors.muted : colors.text}
-            focusedTextColor={selectedChildId ? colors.muted : colors.text}
-            placeholderColor={colors.muted}
-            cursorStyle={{ style: "line", blinking: true }}
-            cursorColor="#ffffff"
-            flexGrow={1}
-            maxHeight={maxInputLines}
-            minHeight={1}
-            syntaxStyle={composerTokenVisuals.syntaxStyle}
-            keyBindings={[...keyBindings]}
-            onSubmit={onSubmit}
-            wrapMode="word"
-            scrollMargin={0}
-          />
-        )}
+        <fermiComposer
+          ref={(node: any) => {
+            (inputRef as any).current = node;
+          }}
+          focused={focused}
+          placeholder={placeholder}
+          textColor={selectedChildId ? colors.muted : colors.text}
+          placeholderColor={colors.muted}
+          tokenColor={colors.accent}
+          cursorColor="#ffffff"
+          flexGrow={1}
+          minHeight={1}
+          maxHeight={maxInputLines}
+          maxLines={maxInputLines}
+          onSubmit={onSubmit}
+        />
       </box>
 
       {/* Bottom row: permission/hint (left, mutually exclusive) + usage + context (right) */}
