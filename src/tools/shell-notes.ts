@@ -8,7 +8,8 @@
 import type { ShellKind } from "../platform/types.js";
 
 /**
- * Build shell notes for the {SHELL_NOTES} template variable in tools.md.
+ * Build shell notes for the {SHELL_NOTES} template variable in the bash
+ * tool guide (src/tools/docs/bash.md).
  * For bash/sh this is empty (default assumption). For PowerShell variants
  * it explains the syntax differences the model must respect.
  */

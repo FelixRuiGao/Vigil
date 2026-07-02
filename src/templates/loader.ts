@@ -9,7 +9,7 @@
  *   +-- main/
  *   |   +-- agent.yaml          # required
  *   |   +-- system_prompt.md    # referenced by system_prompt_file
- *   |   +-- tools.md            # referenced by tools_prompt_file
+ *   |   +-- policy.md           # referenced by tools_prompt_file (optional)
  *   |   +-- knowledge/          # optional -- files appended to system prompt
  *   |       +-- style_guide.md
  *

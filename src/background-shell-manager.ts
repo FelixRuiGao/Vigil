@@ -581,8 +581,9 @@ export class BackgroundShellManager {
     // Header signals dead-shell state once; the `status:` field repeats it
     // in machine-readable form. We deliberately don't add a separate
     // warning banner — the actionable guidance ("start a new
-    // bash_background to resume") lives in tools.md so dead-state reads
-    // don't get pushed below an attention-grabbing block of prose.
+    // bash_background to resume") lives in the kill_shell tool guide
+    // (src/tools/docs/) so dead-state reads don't get pushed below an
+    // attention-grabbing block of prose.
     const header = entry.status === "running"
       ? `# Shell Output`
       : `# Shell Output — TERMINATED`;

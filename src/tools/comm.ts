@@ -2,7 +2,9 @@
  * Communication and orchestration tools.
  *
  * Tool definitions for the context-centric runtime.
- * Detailed usage guidance is in agent_templates/main/system_prompt.md.
+ * Descriptions come from the brief segments in src/tools/docs/; detailed
+ * usage lives in the same files' guide segments (rendered into the system
+ * prompt) plus agent_templates/main/policy.md for main-only pedagogy.
  * Tool executors are created at runtime by Session.
  */
 
