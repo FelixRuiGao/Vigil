@@ -2,5 +2,7 @@ type: agent
 name: reviewer
 description: "Reviews changes made by another agent with fresh-eyes context. Runs tests, checks scope, returns a structured verdict."
 system_prompt_file: system_prompt.md
-tool_tier: reversible
+# read + shell + util, deliberately no edit pack: the reviewer's own prompt
+# promises "You cannot modify files", and the spawn guide advertises the same.
+tools: [read, shell, util]
 max_tool_rounds: 200

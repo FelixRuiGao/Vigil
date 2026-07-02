@@ -25,7 +25,7 @@ export const SPAWN_TOOL: ToolDef = {
       },
       template_path: {
         type: "string",
-        description: "Path to a custom template directory relative to {SESSION_ARTIFACTS}.",
+        description: "Path to a custom template directory, relative to the session artifacts directory.",
       },
       task: {
         type: "string",
