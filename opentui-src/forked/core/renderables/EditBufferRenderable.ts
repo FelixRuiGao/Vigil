@@ -10,43 +10,6 @@ import type { SyntaxStyle } from "../syntax-style.js"
 
 const BrandedEditBufferRenderable: unique symbol = Symbol.for("@opentui/core/EditBufferRenderable")
 
-type SegmenterLike = {
-  segment(input: string): Iterable<{ segment: string }>
-}
-
-type IntlWithOptionalSegmenter = typeof Intl & {
-  Segmenter?: new (locale?: string, options?: { granularity?: "grapheme" }) => SegmenterLike
-}
-
-const graphemeSegmenter = (() => {
-  const Segmenter = (Intl as IntlWithOptionalSegmenter).Segmenter
-  return Segmenter ? new Segmenter(undefined, { granularity: "grapheme" }) : null
-})()
-
-function splitGraphemes(text: string): string[] {
-  if (!text) return []
-  if (!graphemeSegmenter) return Array.from(text)
-  return Array.from(graphemeSegmenter.segment(text), (part) => part.segment)
-}
-
-function normalizeDisplayColumnToGraphemeBoundary(text: string, col: number): number {
-  if (col <= 0 || !text) return col
-
-  let currentCol = 0
-  for (const grapheme of splitGraphemes(text)) {
-    const width = Bun.stringWidth(grapheme)
-    const nextCol = currentCol + Math.max(0, width)
-
-    if (col > currentCol && col < nextCol) {
-      return currentCol
-    }
-
-    currentCol = nextCol
-  }
-
-  return col
-}
-
 export type EditorCapture = "escape" | "navigate" | "submit" | "tab"
 
 export interface EditorTraits {
@@ -115,9 +78,6 @@ export abstract class EditBufferRenderable extends Renderable implements LineInf
   protected _selectionBg: RGBA | undefined
   protected _selectionFg: RGBA | undefined
   protected _wrapMode: "none" | "char" | "word" = "word"
-  private _pendingWheelDeltaX: number = 0
-  private _pendingWheelDeltaY: number = 0
-  protected _pendingViewportClamp: boolean = false
   protected _scrollMargin: number = 0.2
   protected _showCursor: boolean = true
   protected _cursorColor: RGBA
@@ -454,54 +414,35 @@ export abstract class EditBufferRenderable extends Renderable implements LineInf
     }
   }
 
-  protected canConsumeScrollDirection(direction: string | undefined): boolean {
-    const viewport = this.editorView.getViewport()
-    const totalVirtualLines = this.editorView.getTotalVirtualLineCount()
-    const maxOffsetY = Math.max(0, totalVirtualLines - viewport.height)
-
-    if (direction === "up") {
-      return viewport.offsetY > 0
-    }
-    if (direction === "down") {
-      return viewport.offsetY < maxOffsetY
-    }
-    if (this._wrapMode === "none") {
-      if (direction === "left") {
-        return viewport.offsetX > 0
-      }
-      if (direction === "right") {
-        return true
-      }
-    }
-
-    return false
-  }
-
   protected handleScroll(event: any): void {
     if (!event.scroll) return
 
     const { direction, delta } = event.scroll
-
-    const canConsume = this.canConsumeScrollDirection(direction)
-    if (!canConsume) return
+    const viewport = this.editorView.getViewport()
 
     if (direction === "up") {
-      this._pendingWheelDeltaY -= delta
+      const newOffsetY = Math.max(0, viewport.offsetY - delta)
+      this.editorView.setViewport(viewport.offsetX, newOffsetY, viewport.width, viewport.height, true)
+      this.requestRender()
     } else if (direction === "down") {
-      this._pendingWheelDeltaY += delta
+      const totalVirtualLines = this.editorView.getTotalVirtualLineCount()
+      const maxOffsetY = Math.max(0, totalVirtualLines - viewport.height)
+      const newOffsetY = Math.min(viewport.offsetY + delta, maxOffsetY)
+      this.editorView.setViewport(viewport.offsetX, newOffsetY, viewport.width, viewport.height, true)
+      this.requestRender()
     }
 
     if (this._wrapMode === "none") {
       if (direction === "left") {
-        this._pendingWheelDeltaX -= delta
+        const newOffsetX = Math.max(0, viewport.offsetX - delta)
+        this.editorView.setViewport(newOffsetX, viewport.offsetY, viewport.width, viewport.height, true)
+        this.requestRender()
       } else if (direction === "right") {
-        this._pendingWheelDeltaX += delta
+        const newOffsetX = viewport.offsetX + delta
+        this.editorView.setViewport(newOffsetX, viewport.offsetY, viewport.width, viewport.height, true)
+        this.requestRender()
       }
     }
-
-    event.stopPropagation()
-    event.preventDefault()
-    this.requestRender()
   }
 
   protected onResize(width: number, height: number): void {
@@ -1041,48 +982,6 @@ export abstract class EditBufferRenderable extends Renderable implements LineInf
   render(buffer: OptimizedBuffer, deltaTime: number): void {
     if (!this.visible) return
     if (this.isDestroyed) return
-
-    if (this._pendingWheelDeltaX !== 0 || this._pendingWheelDeltaY !== 0) {
-      const pendingX = this._pendingWheelDeltaX
-      const pendingY = this._pendingWheelDeltaY
-      this._pendingWheelDeltaX = 0
-      this._pendingWheelDeltaY = 0
-
-      const viewport = this.editorView.getViewport()
-      let nextOffsetX = viewport.offsetX
-      let nextOffsetY = viewport.offsetY
-
-      if (pendingY !== 0) {
-        const totalVirtualLines = this.editorView.getTotalVirtualLineCount()
-        const maxOffsetY = Math.max(0, totalVirtualLines - viewport.height)
-        nextOffsetY = Math.max(0, Math.min(viewport.offsetY + pendingY, maxOffsetY))
-      }
-
-      if (this._wrapMode === "none" && pendingX !== 0) {
-        nextOffsetX = Math.max(0, viewport.offsetX + pendingX)
-      }
-
-      if (nextOffsetX !== viewport.offsetX || nextOffsetY !== viewport.offsetY) {
-        this.editorView.setViewport(nextOffsetX, nextOffsetY, viewport.width, viewport.height, true)
-      }
-    }
-
-    if (this._pendingViewportClamp) {
-      this._pendingViewportClamp = false
-      const viewport = this.editorView.getViewport()
-      const totalVirtualLines = this.editorView.getTotalVirtualLineCount()
-      const maxOffsetY = Math.max(0, totalVirtualLines - viewport.height)
-      if (viewport.offsetY > maxOffsetY) {
-        // This clamp only ever scrolls the viewport UP (offsetY -> maxOffsetY)
-        // after a content-shrinking edit pushed it past the end. Pass
-        // moveCursor=false: scrolling up can't push an already-visible
-        // near-bottom cursor off-screen, and moveCursor=true would drag the
-        // cursor onto the wrong logical line (e.g. Cmd+Backspace at the start
-        // of the last line, while scrolled, jumping the caret up one row).
-        this.editorView.setViewport(viewport.offsetX, maxOffsetY, viewport.width, viewport.height, false)
-      }
-    }
-
     // Editor rendering/cursor placement reads absolute coordinates multiple
     // times per frame, so it benefits from the same cached screen position.
     const screenX = this._screenX
@@ -1105,47 +1004,12 @@ export abstract class EditBufferRenderable extends Renderable implements LineInf
     const visualCursor = this.editorView.getVisualCursor()
     const screenX = this._screenX
     const screenY = this._screenY
-    const normalizedVisualCol = this.normalizeCursorVisualColumn(visualCursor)
 
-    const cursorX = screenX + normalizedVisualCol + 1 // +1 for 1-based terminal coords
+    const cursorX = screenX + visualCursor.visualCol + 1 // +1 for 1-based terminal coords
     const cursorY = screenY + visualCursor.visualRow + 1 // +1 for 1-based terminal coords
-
-    // Hide cursor if it's outside the textarea's own bounds.
-    //
-    // The X check uses `> width` (not `>= width`) on purpose: when the user
-    // types up to the textarea's right edge and the cursor moves to "after
-    // the last char", visualCol equals width, which would draw the cursor
-    // in the cell immediately to the right of the textarea. That cell is
-    // typically reserved by the parent (e.g. an outer box with
-    // paddingRight={1} around a bordered input), so allowing it keeps the
-    // cursor visible instead of clipping it. visualCol > width (further
-    // past the right edge) is still treated as out-of-bounds.
-    const cx = cursorX - 1
-    const cy = cursorY - 1
-    if (cx < screenX || cx > screenX + this.width || cy < screenY || cy >= screenY + this.height) {
-      this._ctx.setCursorPosition(cursorX, cursorY, false)
-      return
-    }
-
-    // Hide cursor if it's clipped by a scrollbox viewport (scissor rect).
-    if (!buffer.isWithinScissorRect(cx, cy)) {
-      this._ctx.setCursorPosition(cursorX, cursorY, false)
-      return
-    }
 
     this._ctx.setCursorPosition(cursorX, cursorY, true)
     this._ctx.setCursorStyle({ ...this._cursorStyle, color: this._cursorColor })
-  }
-
-  private normalizeCursorVisualColumn(visualCursor: VisualCursor): number {
-    const line = this.plainText.split("\n")[visualCursor.logicalRow] ?? ""
-    const normalizedLogicalCol = normalizeDisplayColumnToGraphemeBoundary(line, visualCursor.logicalCol)
-    if (normalizedLogicalCol === visualCursor.logicalCol) {
-      return visualCursor.visualCol
-    }
-
-    const delta = visualCursor.logicalCol - normalizedLogicalCol
-    return Math.max(0, visualCursor.visualCol - delta)
   }
 
   public focus(): void {

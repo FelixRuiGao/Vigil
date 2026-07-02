@@ -51,28 +51,6 @@ describe("Textarea - Selection Tests", () => {
       expect(editor.getSelectedText()).toBe("Hello")
     })
 
-    it("should keep the terminal cursor out of wide grapheme trailing cells", async () => {
-      const { textarea: editor } = await createTextareaRenderable(currentRenderer, renderOnce, {
-        initialValue: "这是一个示例句子",
-        width: 40,
-        height: 3,
-        selectable: true,
-        cursorStyle: { style: "line", blinking: false },
-      })
-      editor.focus()
-      await renderOnce()
-
-      await currentMouse.click(editor.x + 1, editor.y)
-      await renderOnce()
-      expect(editor.visualCursor.visualCol).toBe(1)
-      expect(currentRenderer.getCursorState().x).toBe(editor.x + 1)
-
-      await currentMouse.click(editor.x + 3, editor.y)
-      await renderOnce()
-      expect(editor.visualCursor.visualCol).toBe(3)
-      expect(currentRenderer.getCursorState().x).toBe(editor.x + 3)
-    })
-
     it("should return selected text from multi-line content", async () => {
       const { textarea: editor } = await createTextareaRenderable(currentRenderer, renderOnce, {
         initialValue: "AAAA\nBBBB\nCCCC",
