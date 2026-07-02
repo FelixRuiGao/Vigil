@@ -106,6 +106,7 @@ import { PermissionAdvisor, PermissionRuleStore, initBashParser, type Permission
 import { HookRuntime, type HookEvent, type HookPayload } from "./hooks/index.js";
 import type { HookManifest } from "./hooks/types.js";
 import { assembleFullSystemPrompt, readAgentsMemory } from "./prompt-assembler.js";
+import { buildModelOverlay } from "./prompt-overlays.js";
 import { shell } from "./platform/index.js";
 import { buildShellNotes } from "./tools/shell-notes.js";
 import {
@@ -3039,6 +3040,7 @@ export class Session {
       newModelConfig.model,
       this._preferredThinkingLevel,
     );
+    this._rebuildSystemPromptForModelChange();
   }
 
   reloadCurrentModelConfig(): void {
@@ -3056,6 +3058,18 @@ export class Session {
       newModelConfig.model,
       this._preferredThinkingLevel,
     );
+    this._rebuildSystemPromptForModelChange();
+  }
+
+  /**
+   * Rebuild the cached system prompt after a model change so the
+   * model-family overlay layer tracks the current model. Cheap to do
+   * unconditionally: a model switch invalidates the provider-side prompt
+   * cache regardless. Does NOT touch {INITIAL_MODEL} (fixed by design).
+   */
+  private _rebuildSystemPromptForModelChange(): void {
+    this._cachedSystemPrompt = this._assembleSystemPrompt();
+    this._promptSectionEstimates = null;
   }
 
   applyGlobalPreferences(preferences: GlobalTuiPreferences): void {
@@ -5961,6 +5975,14 @@ export class Session {
             this._capabilities.includeSkillTools
               ? buildSkillsSection(this._skills)
               : "",
+        },
+        {
+          id: "model-overlay",
+          order: 200,
+          // Keyed on the CURRENT model — switchModel/reloadCurrentModelConfig
+          // rebuild the cached prompt so a mid-session model change picks the
+          // right overlay up.
+          content: () => buildModelOverlay(this.primaryAgent.modelConfig.model),
         },
       ],
     });
