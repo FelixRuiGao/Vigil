@@ -6,6 +6,7 @@ import { describe, expect, it } from "bun:test";
 
 import { Config } from "../src/config.js";
 import { loadTemplate, validateTemplate } from "../src/templates/loader.js";
+import { buildToolGuidelinesSection } from "../src/tools/tool-docs.js";
 
 function makeTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -22,18 +23,22 @@ function makeConfig(): Config {
 }
 
 describe("template type validation", () => {
-  it("documents autonomous summarize user-message restrictions in the main tool prompt", () => {
-    const toolsPrompt = readFileSync(
-      join(process.cwd(), "agent_templates", "main", "tools.md"),
+  it("documents autonomous summarize user-message restrictions in the main agent's prompt", () => {
+    // What the model actually sees: the generated summarize_context guide
+    // plus main's hand-written policy file.
+    const guide = buildToolGuidelinesSection(["summarize_context"]);
+    const policy = readFileSync(
+      join(process.cwd(), "agent_templates", "main", "policy.md"),
       "utf-8",
     );
+    const combined = guide + "\n\n" + policy;
 
-    expect(toolsPrompt).toContain("Never summarize context groups that contain the user's own messages.");
-    expect(toolsPrompt).toContain("never summarize ranges that contain user messages on your own initiative");
-    expect(toolsPrompt).toContain("<user-message>");
-    expect(toolsPrompt).not.toContain("<summarize-request>");
-    expect(toolsPrompt).not.toContain("user-requested mode");
-    expect(toolsPrompt).toContain("`summarize_context`");
+    expect(combined).toContain("Never summarize context groups that contain the user's own messages.");
+    expect(combined).toContain("never summarize ranges that contain the user's own messages on your own initiative");
+    expect(combined).toContain("<user-message>");
+    expect(combined).not.toContain("<summarize-request>");
+    expect(combined).not.toContain("user-requested mode");
+    expect(combined).toContain("`summarize_context`");
   });
 
   it("rejects templates without type: agent", () => {

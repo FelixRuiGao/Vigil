@@ -12,6 +12,7 @@ import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { ToolDef } from "../providers/base.js";
 import { truncateMiddle } from "./shared.js";
+import { toolBrief } from "./tool-docs.js";
 
 // ------------------------------------------------------------------
 // Constants
@@ -29,10 +30,7 @@ const LOCAL_MAX_REDIRECTS = 10;
 
 export const WEB_FETCH: ToolDef = {
   name: "web_fetch",
-  description:
-    "Fetch content from a URL and return it as readable text. " +
-    "Uses a high-quality remote extractor first, then falls back to local extraction if needed. " +
-    "HTML pages are converted to markdown-like text.",
+  description: toolBrief("web_fetch"),
   parameters: {
     type: "object",
     properties: {

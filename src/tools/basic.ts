@@ -446,17 +446,11 @@ const FILE_WRITE_LOCKS = new Map<string, Promise<void>>();
 // Tool definitions (provider-agnostic JSON Schema)
 // ======================================================================
 
+import { toolBrief } from "./tool-docs.js";
+
 const READ: ToolDef = {
   name: "read_file",
-  description:
-    "Read the contents of a text file (max 50 MB). " +
-    "Returns up to 2000 lines / 80,000 characters per call; " +
-    "individual lines longer than 5000 chars are truncated by default (raise max_line_chars when you need a long line in full). " +
-    "PDF, DOCX, XLSX, and similar formats are returned as auto-extracted Markdown. " +
-    "Image files are returned as visual content blocks when the model supports multimodal input. " +
-    "Returns file metadata (including mtime_ms) for optional optimistic concurrency checks. " +
-    "Use start_line+end_line (inclusive range) or offset+limit (offset = first line, limit = number of lines) to navigate large files across multiple calls. " +
-    "If you know there are several files to read, prefer issuing multiple read_file calls in parallel.",
+  description: toolBrief("read_file"),
   parameters: {
     type: "object",
     properties: {
@@ -503,11 +497,7 @@ const LIST_MAX_DEPTH_CAP = 6;
 
 const LIST: ToolDef = {
   name: "list_dir",
-  description:
-    "List files and directories as a tree. Returns names with file sizes for files. " +
-    "Common build / cache directories (node_modules, .git, dist, target, .venv, etc.) are skipped by default; " +
-    "to inspect one, pass it as the `path` argument explicitly. " +
-    "If you are searching for a specific filename, prefer `glob`; for content matches, prefer `grep`.",
+  description: toolBrief("list_dir"),
   parameters: {
     type: "object",
     properties: {
@@ -540,13 +530,7 @@ const LIST: ToolDef = {
 
 const EDIT: ToolDef = {
   name: "edit_file",
-  description:
-    "Apply a patch to an existing file. Each edit replaces an `old_str` with a `new_str`; " +
-    "by default `old_str` must appear exactly once in the file (or the call fails with the line numbers of all matches so you can disambiguate). " +
-    "Set `replace_all: true` on an edit to replace every occurrence — useful for renames. " +
-    "Multiple edits in one call are applied atomically and must not overlap. " +
-    "Use `append_str` to add content at the end of the file (can be combined with edits — appends run last). " +
-    "Refuses no-op edits where `old_str === new_str`.",
+  description: toolBrief("edit_file"),
   parameters: {
     type: "object",
     properties: {
@@ -588,10 +572,7 @@ const EDIT: ToolDef = {
 
 const WRITE: ToolDef = {
   name: "write_file",
-  description:
-    "Create or overwrite a file with the given content. Parent directories are created automatically. " +
-    "Prefer write_file over edit_file when you intend to replace the entire file — it is fewer tokens " +
-    "than echoing the full existing content into edit_file. Use edit_file for targeted modifications.",
+  description: toolBrief("write_file"),
   parameters: {
     type: "object",
     properties: {
@@ -616,23 +597,7 @@ const WRITE: ToolDef = {
 
 import type { ShellKind } from "../platform/index.js";
 
-const BASH_DESCRIPTION_BASE =
-  "Execute a synchronous shell command and return stdout, stderr, and exit code.\n\n" +
-  "TIMEOUT is REQUIRED — it is the synchronous wait budget, not a kill switch. If the " +
-  "command finishes in time you get its full output as usual. If the timeout elapses, " +
-  "the command is NOT killed: it keeps running and is moved to a tracked background " +
-  "shell. The tool returns the output captured so far plus the shell id — poll it with " +
-  "`bash_output`, wait with `await_event`, or stop it with `kill_shell`. Never re-run a " +
-  "command just because it timed out: its side effects are still in progress — poll the " +
-  "shell instead.\n\n" +
-  "Choose the timeout to match how long you are willing to block on the result. " +
-  "Known long-running jobs are better started with bash_background directly (clearer " +
-  "intent, cleaner logs). Persistent processes that never exit on their own — dev " +
-  "servers, file watchers, daemons, `npm run dev`, `vite`, `next dev`, `cargo watch`, " +
-  "`tail -f` — should ALWAYS use bash_background.\n\n" +
-  "After a timeout hand-off, look at the partial output: if the command appears stuck " +
-  "or was waiting for interactive input, remember to kill_shell it rather than leaving " +
-  "a zombie shell behind.";
+const BASH_DESCRIPTION_BASE = toolBrief("bash");
 
 function shellLabel(kind: ShellKind): string {
   switch (kind) {
@@ -686,8 +651,7 @@ const BASH: ToolDef = buildBashToolDef(shell.kind);
 
 const TIME: ToolDef = {
   name: "time",
-  description:
-    "Return the current local time of the runtime environment, including timezone and UTC offset.",
+  description: toolBrief("time"),
   parameters: {
     type: "object",
     properties: {},
@@ -710,12 +674,7 @@ const GLOB_MAX_DEPTH = 16;
 
 const GLOB: ToolDef = {
   name: "glob",
-  description:
-    "Find files by name/path pattern. Returns matching absolute paths sorted by modification time " +
-    "(most recently modified first). Patterns without `/` are auto-prefixed with `**/` so " +
-    "`*.ts` matches every `.ts` file in the tree. " +
-    "Common build / cache directories (node_modules, .git, dist, target, .venv, etc.) are skipped. " +
-    "Supports `**`, `*`, `?`, `[abc]`, and `{a,b}` brace expansion.",
+  description: toolBrief("glob"),
   parameters: {
     type: "object",
     properties: {
@@ -747,13 +706,7 @@ const GLOB: ToolDef = {
 
 const GREP: ToolDef = {
   name: "grep",
-  description:
-    "Search file contents by regex. Pattern can be a single string OR an array of strings " +
-    "(matches lines that contain ANY of the patterns — useful for snake_case/camelCase/PascalCase variants in one call). " +
-    "Smart case: an all-lowercase pattern is matched case-insensitively unless `-i` is set explicitly. " +
-    "Defaults: returns up to 100 results overall and 15 matching lines per file in content mode; " +
-    "individual lines longer than 2000 chars are truncated. " +
-    "Skips common build / cache directories (node_modules, .git, dist, target, .venv, etc.).",
+  description: toolBrief("grep"),
   parameters: {
     type: "object",
     properties: {
@@ -828,13 +781,7 @@ const GREP: ToolDef = {
 
 export const BASH_BACKGROUND_TOOL: ToolDef = {
   name: "bash_background",
-  description:
-    "Start a background shell command tracked by the Session. " +
-    "Use for dev servers, watchers, and long-running commands whose output you want to inspect later.\n\n" +
-    "Don't leave zombie shells behind: when a background shell is no longer needed for your work " +
-    "AND has no value to the user, remember to kill_shell it. The exception is processes the user " +
-    "benefits from directly — a dev server they are clicking around in (`npm run dev`, `vite`) " +
-    "should keep running unless they say otherwise.",
+  description: toolBrief("bash_background"),
   parameters: {
     type: "object",
     properties: {
@@ -853,10 +800,7 @@ export const BASH_BACKGROUND_TOOL: ToolDef = {
 
 export const BASH_OUTPUT_TOOL: ToolDef = {
   name: "bash_output",
-  description:
-    "Read output from a tracked background shell. " +
-    "By default, returns unread output since the last bash_output call for that shell. " +
-    "Use tail_lines to inspect recent output without advancing the unread cursor.",
+  description: toolBrief("bash_output"),
   parameters: {
     type: "object",
     properties: {
@@ -878,12 +822,7 @@ export const BASH_OUTPUT_TOOL: ToolDef = {
 
 export const KILL_SHELL_TOOL: ToolDef = {
   name: "kill_shell",
-  description:
-    "Terminate one or more tracked background shells. " +
-    "The signal is sent to the entire process group so children (npm → vite, etc.) are killed in full. " +
-    "After kill the shell entry stays so you can read its final log via bash_output, but the process is gone — " +
-    "killed shells do not auto-restart, and HMR / file-watching stops. " +
-    "You can reuse the same id in a new bash_background once the prior shell has stopped.",
+  description: toolBrief("kill_shell"),
   parameters: {
     type: "object",
     properties: {

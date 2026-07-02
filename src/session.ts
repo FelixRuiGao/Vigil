@@ -18,7 +18,7 @@ import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 // child_process — now only used by BackgroundShellManager
 import * as yaml from "js-yaml";
 
-import { assembleSystemPrompt, getPromptLayers } from "./templates/loader.js";
+import { assembleSystemPrompt, getPromptLayers, resolveToolNames } from "./templates/loader.js";
 
 import { Agent, isNoReply, NO_REPLY_MARKER } from "./agents/agent.js";
 import type {
@@ -92,6 +92,8 @@ import { SafePathError, safePath } from "./security/path.js";
 import { parsePlanFile, formatPlanSnapshot, PLAN_FILENAME, type PlanCheckpoint } from "./plan-state.js";
 import {
   buildToolExecutors,
+  buildSkillsSection,
+  commToolNamesForCapabilities,
   ensureCommTools,
   ensureSkillTool,
   buildSkillToolDef,
@@ -3201,7 +3203,7 @@ export class Session {
     let estSystemPrompt = 0;
     let estToolDocs = 0;
     if (recipe) {
-      const layers = getPromptLayers(recipe);
+      const layers = getPromptLayers(recipe, { guidelineTools: this._guidelineToolNames() });
       estSystemPrompt = countTokens(layers.roleBody) + countTokens(layers.knowledge);
       estToolDocs = countTokens(layers.toolDocs);
     } else {
@@ -3221,11 +3223,15 @@ export class Session {
     const agentsMdText = readAgentsMemory(this._projectRoot);
     const estAgentsMd = agentsMdText ? countTokens(agentsMdText) : 0;
 
-    // Skill tool (description embeds the skill listing)
+    // Skills: static skill tool schema + the Available Skills prompt section
     const skillDef = buildSkillToolDef(this._skills);
-    const estSkills = skillDef
-      ? countTokens(JSON.stringify({ name: skillDef.name, description: skillDef.description, parameters: skillDef.parameters }))
-      : 0;
+    const skillsSection = this._capabilities.includeSkillTools
+      ? buildSkillsSection(this._skills)
+      : "";
+    const estSkills =
+      (skillDef
+        ? countTokens(JSON.stringify({ name: skillDef.name, description: skillDef.description, parameters: skillDef.parameters }))
+        : 0) + (skillsSection ? countTokens(skillsSection) : 0);
 
     // Tools = tool docs (inline in prompt) + tool schemas (API tools[])
     const tools = estToolDocs + estToolSchemas;
@@ -5908,10 +5914,29 @@ export class Session {
     return d.compactScopedLabel || mc.model;
   }
 
+  /**
+   * The tool names whose guides go into the generated Tool Guidelines
+   * section: the template's declared tools plus the comm tools this
+   * session's capabilities grant. Derived from recipe + capabilities (not
+   * from the mutable primaryAgent.tools array) so the result is
+   * deterministic regardless of when ensureCommTools/ensureSkillTool ran.
+   * MCP tools are excluded by construction — their docs live in their own
+   * schemas.
+   */
+  private _guidelineToolNames(): string[] {
+    const names: string[] = [];
+    const recipe = this.primaryAgent.promptRecipe;
+    if (recipe) {
+      names.push(...resolveToolNames(recipe.spec));
+    }
+    names.push(...commToolNamesForCapabilities(this._capabilities));
+    return names;
+  }
+
   private _assembleSystemPrompt(): string {
     const recipe = this.primaryAgent.promptRecipe;
     const agentPrompt = recipe
-      ? assembleSystemPrompt(recipe)
+      ? assembleSystemPrompt(recipe, { guidelineTools: this._guidelineToolNames() })
       : this.primaryAgent.systemPrompt;
 
     return assembleFullSystemPrompt({
@@ -5924,6 +5949,20 @@ export class Session {
       initialModel: this._initialModel,
       agentModels: this.config.agentModels,
       shellNotes: buildShellNotes(shell.kind),
+      extraLayers: [
+        {
+          id: "skills",
+          order: 100,
+          // Lazy: reload reassembles the prompt, so the listing tracks the
+          // live skills map. The skill inventory lives here (system prompt
+          // tail) instead of the skill tool's description so skill changes
+          // never touch the tools array.
+          content: () =>
+            this._capabilities.includeSkillTools
+              ? buildSkillsSection(this._skills)
+              : "",
+        },
+      ],
     });
   }
 

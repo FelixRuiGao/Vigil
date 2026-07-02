@@ -35,6 +35,7 @@ import type { SessionCapabilities } from "./session-capabilities.js";
 import type { SkillMeta } from "./skills/loader.js";
 import type { MCPClientManager } from "./mcp-client.js";
 import { setArgRepairSink } from "./tools/arg-repair.js";
+import { toolBrief } from "./tools/tool-docs.js";
 
 // Wire tool-input repair telemetry once. Gated behind an env var so it stays
 // silent by default; enable to watch per-(tool,key) repair shapes — a leading
@@ -69,28 +70,53 @@ export interface CatalogDeps {
   disabledSkills: ReadonlySet<string>;
 }
 
-/**
- * Build the skill meta-tool definition from available skills.
- * Returns null if no skills are available for model invocation.
- */
-export function buildSkillToolDef(
+/** Skills visible to the model (user-only skills are filtered out). */
+export function modelInvocableSkills(
   skills: ReadonlyMap<string, SkillMeta>,
-): ToolDef | null {
-  const available = [...skills.values()].filter(
-    (s) => !s.disableModelInvocation,
-  );
-  if (available.length === 0) return null;
+): SkillMeta[] {
+  return [...skills.values()].filter((s) => !s.disableModelInvocation);
+}
+
+/**
+ * Build the "# Available Skills" system-prompt section.
+ * The listing lives here (not in the skill tool's description) so that skill
+ * install/remove/enable/disable never mutates the tools array — the only
+ * remaining source of tool-schema change is MCP. Returns "" when no skills
+ * are available (the section is omitted entirely).
+ */
+export function buildSkillsSection(
+  skills: ReadonlyMap<string, SkillMeta>,
+): string {
+  const available = modelInvocableSkills(skills);
+  if (available.length === 0) return "";
 
   const listing = available
     .map((s) => `- ${s.name}: ${s.description}`)
     .join("\n");
 
+  return (
+    "# Available Skills\n\n" +
+    "Invoke a skill by calling the `skill` tool with its name; the skill's full " +
+    "instructions are returned for you to follow. Pass context via the `arguments` parameter.\n\n" +
+    listing
+  );
+}
+
+/**
+ * Build the skill meta-tool definition. The description is STATIC — the
+ * dynamic listing lives in the system prompt (buildSkillsSection) so skill
+ * changes don't invalidate the tools array. Keep it that way.
+ * Returns null if no skills are available for model invocation.
+ */
+export function buildSkillToolDef(
+  skills: ReadonlyMap<string, SkillMeta>,
+): ToolDef | null {
+  const available = modelInvocableSkills(skills);
+  if (available.length === 0) return null;
+
   return {
     name: "skill",
-    description:
-      "Invoke a skill by name. The skill's full instructions are returned for you to follow.\n\n" +
-      "Available skills:\n" +
-      listing,
+    description: toolBrief("skill"),
     parameters: {
       type: "object",
       properties: {
@@ -135,6 +161,29 @@ export function ensureCommTools(
       tools.push(toolDef);
     }
   }
+}
+
+/**
+ * The comm/meta tool names a session with these capabilities will have.
+ * Pure function of capabilities — used to build the generated Tool Guidelines
+ * section deterministically, independent of when ensureCommTools ran.
+ * Must stay in sync with ensureCommTools/ensureSkillTool (and the `send`
+ * push in child-session-manager, which accompanies spawn).
+ */
+export function commToolNamesForCapabilities(
+  capabilities: SessionCapabilities,
+): string[] {
+  const names: string[] = [];
+  if (capabilities.includeSpawnTool) names.push(SPAWN_TOOL.name, SEND_TOOL.name);
+  if (capabilities.includeKillTool) names.push(KILL_AGENT_TOOL.name);
+  if (capabilities.includeCheckStatusTool) names.push(CHECK_STATUS_TOOL.name);
+  if (capabilities.includeAwaitEventTool) names.push(AWAIT_EVENT_TOOL.name);
+  if (capabilities.includeShowContextTool) names.push(SHOW_CONTEXT_TOOL.name);
+  if (capabilities.includeSummarizeContextTool) names.push(SUMMARIZE_CONTEXT_TOOL.name);
+  if (capabilities.includeAskTool) names.push(ASK_TOOL.name);
+  if (capabilities.includeReloadTool) names.push(RELOAD_TOOL.name);
+  if (capabilities.includeSkillTools) names.push("skill");
+  return names;
 }
 
 /**

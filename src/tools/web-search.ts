@@ -18,11 +18,11 @@ import type { ToolDef } from "../providers/base.js";
 // Tool definition
 // ------------------------------------------------------------------
 
+import { toolBrief } from "./tool-docs.js";
+
 export const WEB_SEARCH: ToolDef = {
   name: "web_search",
-  description:
-    "Search the web for current information. " +
-    "Returns titles, URLs and highlights for the top results.",
+  description: toolBrief("web_search"),
   parameters: {
     type: "object",
     properties: {

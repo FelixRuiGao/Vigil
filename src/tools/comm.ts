@@ -7,13 +7,11 @@
  */
 
 import type { ToolDef } from "../providers/base.js";
+import { toolBrief } from "./tool-docs.js";
 
 export const SPAWN_TOOL: ToolDef = {
   name: "spawn",
-  description:
-    "Spawn a single sub-agent with inline parameters. " +
-    "Check pre-defined templates (e.g. 'explorer', 'reviewer') before creating custom ones. " +
-    "See system prompt for available templates and their capabilities.",
+  description: toolBrief("spawn"),
   parameters: {
     type: "object",
     properties: {
@@ -52,7 +50,7 @@ export const SPAWN_TOOL: ToolDef = {
 
 export const KILL_AGENT_TOOL: ToolDef = {
   name: "kill_agent",
-  description: "Kill one or more running sub-agents by ID.",
+  description: toolBrief("kill_agent"),
   parameters: {
     type: "object",
     properties: {
@@ -70,8 +68,7 @@ export const KILL_AGENT_TOOL: ToolDef = {
 
 export const ASK_TOOL: ToolDef = {
   name: "ask",
-  description:
-    "Ask the user 1-4 structured questions with 1-4 options each.",
+  description: toolBrief("ask"),
   parameters: {
     type: "object",
     properties: {
@@ -105,9 +102,7 @@ export const ASK_TOOL: ToolDef = {
 
 export const SHOW_CONTEXT_TOOL: ToolDef = {
   name: "show_context",
-  description:
-    "Display the context distribution of the current active window. " +
-    "Returns a detailed Context Map showing all context groups with their sizes, types, and content previews.",
+  description: toolBrief("show_context"),
   parameters: {
     type: "object",
     properties: {},
@@ -119,17 +114,7 @@ export const SHOW_CONTEXT_TOOL: ToolDef = {
 
 export const SUMMARIZE_CONTEXT_TOOL: ToolDef = {
   name: "summarize_context",
-  description:
-    "Summarize a contiguous range of context groups — keep the valuable information, drop the rest. " +
-    "Specify the range with `from` and `to` context IDs (inclusive).\n\n" +
-    "Rules:\n" +
-    "- Never summarize the user's own messages on your own initiative — they anchor turns and must survive.\n" +
-    "- Keep each operation within a single turn. For a multi-turn span, submit one operation per turn in a single call — the effect is equivalent.\n" +
-    "- Summaries are ordinary context: they may be re-summarized and merged like any other group. When a summary contains <user-message> blocks (the user's original words), carry those blocks verbatim into the new summary.\n\n" +
-    "Targets specific ranges. For whole-window summarization, the system uses auto-compact (different mechanism).\n\n" +
-    "If you need to inspect the current context distribution first, call show_context.\n\n" +
-    "Example — single context group: from=\"a3f1\", to=\"a3f1\"\n" +
-    "Example — two non-adjacent groups: use TWO separate operations (one per group), NOT one operation spanning the gap.",
+  description: toolBrief("summarize_context"),
   parameters: {
     type: "object",
     properties: {
@@ -168,9 +153,7 @@ export const SUMMARIZE_CONTEXT_TOOL: ToolDef = {
 
 export const CHECK_STATUS_TOOL: ToolDef = {
   name: "check_status",
-  description:
-    "View sub-agent status and background shell status. " +
-    "Returns agent reports (working, completed, errored) and tracked shell summaries.",
+  description: toolBrief("check_status"),
   parameters: {
     type: "object",
     properties: {},
@@ -181,10 +164,7 @@ export const CHECK_STATUS_TOOL: ToolDef = {
 
 export const AWAIT_EVENT_TOOL: ToolDef = {
   name: "await_event",
-  description:
-    "Pause this turn until a runtime event arrives or the timeout expires. " +
-    "Runtime events include sub-agent completion, incoming messages, and tracked background shell exit. " +
-    "Preferred over check_status when you have nothing else to do.",
+  description: toolBrief("await_event"),
   parameters: {
     type: "object",
     properties: {
@@ -201,10 +181,7 @@ export const AWAIT_EVENT_TOOL: ToolDef = {
 
 export const SEND_TOOL: ToolDef = {
   name: "send",
-  description:
-    "Send a message to a persistent child agent by ID. " +
-    "The message is delivered asynchronously — you get a confirmation, not a reply. " +
-    "The target auto-activates if idle.",
+  description: toolBrief("send"),
   parameters: {
     type: "object",
     properties: {
@@ -225,10 +202,7 @@ export const SEND_TOOL: ToolDef = {
 
 export const RELOAD_TOOL: ToolDef = {
   name: "reload",
-  description:
-    "Reload skills, MCP servers, and the system prompt from disk. " +
-    "Call after writing or editing SKILL.md files, AGENTS.md, or MCP config (settings.json mcp_servers). " +
-    "Returns a summary of what changed.",
+  description: toolBrief("reload"),
   parameters: {
     type: "object",
     properties: {},
