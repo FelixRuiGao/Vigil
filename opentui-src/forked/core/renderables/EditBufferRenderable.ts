@@ -1073,7 +1073,13 @@ export abstract class EditBufferRenderable extends Renderable implements LineInf
       const totalVirtualLines = this.editorView.getTotalVirtualLineCount()
       const maxOffsetY = Math.max(0, totalVirtualLines - viewport.height)
       if (viewport.offsetY > maxOffsetY) {
-        this.editorView.setViewport(viewport.offsetX, maxOffsetY, viewport.width, viewport.height, true)
+        // This clamp only ever scrolls the viewport UP (offsetY -> maxOffsetY)
+        // after a content-shrinking edit pushed it past the end. Pass
+        // moveCursor=false: scrolling up can't push an already-visible
+        // near-bottom cursor off-screen, and moveCursor=true would drag the
+        // cursor onto the wrong logical line (e.g. Cmd+Backspace at the start
+        // of the last line, while scrolled, jumping the caret up one row).
+        this.editorView.setViewport(viewport.offsetX, maxOffsetY, viewport.width, viewport.height, false)
       }
     }
 

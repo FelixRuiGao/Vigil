@@ -110,6 +110,7 @@ import {
   serializeComposerText,
   type ComposerTokenVisuals,
 } from "./composer-tokens.js";
+import { asFermiComposer, isFermiComposer } from "./composer/composer-renderable.js";
 import { createDisplayTheme, type DisplayTheme, type DisplayThemeTokens, type DeepPartial, type ThemeMode } from "./display/theme/index.js";
 import { ContextUsageCard, CodexUsageCard } from "./display/panels/usage-cards.js";
 import { StatusPanel } from "./display/panels/status-panel.js";
@@ -1026,7 +1027,10 @@ export function OpenTuiApp({
       maybeCollapseLargePasteRef.current(previousValue, nextValue);
       // Prune draft images whose composer token was deleted
       if (draftImagesRef.current.size > 0) {
-        const tokens = getComposerTokenSnapshots(composer, ensureComposerTokenType(composer));
+        const fermi = asFermiComposer(composer);
+        const tokens = fermi
+          ? fermi.tokens
+          : getComposerTokenSnapshots(composer, ensureComposerTokenType(composer));
         const liveImageIds = new Set(tokens.filter((t) => t.kind === "image" && t.imageId).map((t) => t.imageId));
         for (const id of draftImagesRef.current.keys()) {
           if (!liveImageIds.has(id)) draftImagesRef.current.delete(id);
@@ -1288,6 +1292,22 @@ export function OpenTuiApp({
       renderer.off("selection", onSelection);
     };
   }, [copyOnSelect, renderer, flashCopyToast, showHint]);
+
+  // Self-written composer: its drag-selection is internal (model selection), so
+  // the renderer's "selection" event never fires for it. Route copy-on-select
+  // through the same /autocopy path explicitly.
+  const handleComposerSelectionCopy = useCallback((text: string) => {
+    if (!copyOnSelect || !text) return;
+    void copyToClipboard(text, (t) => renderer.copyToClipboardOSC52(t)).then((ok) => {
+      if (ok) flashCopyToast();
+      else showHint("Copy failed.");
+    });
+  }, [copyOnSelect, renderer, flashCopyToast, showHint]);
+
+  useEffect(() => {
+    const composer = asFermiComposer(inputRef.current);
+    if (composer) composer.onSelectionCopy = handleComposerSelectionCopy;
+  }, [handleComposerSelectionCopy]);
 
   // ── Background shells: stop action + picker ─────────────────────────
 
@@ -1558,6 +1578,9 @@ export function OpenTuiApp({
   const maybeCollapseLargePaste = useCallback((previousValue: string, nextValue: string): boolean => {
     const composer = inputRef.current;
     if (!composer || suppressComposerSyncRef.current) return false;
+    // The self-written composer collapses large pastes into tokens through its
+    // own model (not the extmark layer), so skip the native collapse path here.
+    if (isFermiComposer(composer)) return false;
 
     const diff = getTextDiffRange(previousValue, nextValue);
     if (!diff || !diff.insertedText) return false;
@@ -1591,7 +1614,9 @@ export function OpenTuiApp({
   useEffect(() => {
     const composer = inputRef.current;
     if (!composer) return;
-    patchComposerExtmarksForDisplayWidth(composer);
+    // The self-written composer manages tokens in its own model; the extmark
+    // monkeypatch is native-only.
+    if (!isFermiComposer(composer)) patchComposerExtmarksForDisplayWidth(composer);
 
     const pendingTimers: ReturnType<typeof setTimeout>[] = [];
     const sync = () => {
@@ -1900,6 +1925,8 @@ export function OpenTuiApp({
   const getSerializedComposerInput = useCallback((): string => {
     const composer = inputRef.current;
     if (!composer) return draftValue;
+    const fermiComposer = asFermiComposer(composer);
+    if (fermiComposer) return fermiComposer.serializeSubmitText();
     return serializeComposerText(composer, ensureComposerTokenType(composer));
   }, [draftValue]);
 
@@ -2101,19 +2128,32 @@ export function OpenTuiApp({
       const label = buildFileReferenceLabel(selectedValue);
       suppressComposerSyncRef.current = true;
       try {
-        replaceRangeWithComposerToken(composer, {
-          rangeStart: query.startOffset,
-          rangeEnd: query.endOffset,
-          label,
-          metadata: {
-            kind: "file",
+        const fermiComposer = asFermiComposer(composer);
+        if (fermiComposer) {
+          fermiComposer.replaceRangeWithToken({
+            rangeStart: query.startOffset,
+            rangeEnd: query.endOffset,
             label,
             submitText: label,
+            kind: "file",
             path: selectedValue,
-          },
-          styleId: composerTokenVisuals.fileStyleId,
-          trailingText: " ",
-        });
+            trailingText: " ",
+          });
+        } else {
+          replaceRangeWithComposerToken(composer, {
+            rangeStart: query.startOffset,
+            rangeEnd: query.endOffset,
+            label,
+            metadata: {
+              kind: "file",
+              label,
+              submitText: label,
+              path: selectedValue,
+            },
+            styleId: composerTokenVisuals.fileStyleId,
+            trailingText: " ",
+          });
+        }
       } finally {
         suppressComposerSyncRef.current = false;
       }
@@ -2285,6 +2325,15 @@ export function OpenTuiApp({
     const composer = inputRef.current;
     if (!composer) return;
 
+    // The self-written composer owns the full visual-line-start decision table
+    // (wrapped rows, col-0 join, preserve-empty-last-line) in its renderable.
+    const fermiComposer = asFermiComposer(composer);
+    if (fermiComposer) {
+      fermiComposer.deleteToVisualLineStart();
+      syncComposerState();
+      return;
+    }
+
     if (composer.hasSelection()) {
       composer.deleteCharBackward();
       syncComposerState();
@@ -2315,6 +2364,8 @@ export function OpenTuiApp({
   const isAtFirstVisualLine = useCallback((): boolean => {
     const composer = inputRef.current;
     if (!composer) return false;
+    const fermiComposer = asFermiComposer(composer);
+    if (fermiComposer) return fermiComposer.isAtFirstVisualLine();
     const visualStart = composer.editorView.getVisualSOL();
     return visualStart.logicalRow === 0 && visualStart.logicalCol === 0;
   }, []);
@@ -2322,6 +2373,8 @@ export function OpenTuiApp({
   const isAtLastVisualLine = useCallback((): boolean => {
     const composer = inputRef.current;
     if (!composer) return false;
+    const fermiComposer = asFermiComposer(composer);
+    if (fermiComposer) return fermiComposer.isAtLastVisualLine();
     const lineCount = composer.lineCount || composer.editBuffer.getLineCount();
     const visualEnd = composer.editorView.getVisualEOL();
     const logicalEnd = composer.editBuffer.getEOL();
@@ -2937,20 +2990,33 @@ export function OpenTuiApp({
           if (cmp) {
             suppressComposerSyncRef.current = true;
             try {
-              replaceRangeWithComposerToken(cmp, {
-                rangeStart: cmp.cursorOffset,
-                rangeEnd: cmp.cursorOffset,
-                label,
-                metadata: {
-                  kind: "image",
+              const fermiCmp = asFermiComposer(cmp);
+              if (fermiCmp) {
+                fermiCmp.replaceRangeWithToken({
+                  rangeStart: cmp.cursorOffset,
+                  rangeEnd: cmp.cursorOffset,
                   label,
                   submitText: label,
+                  kind: "image",
                   imageId,
-                  index: idx,
-                },
-                styleId: composerTokenVisuals.imageStyleId,
-                trailingText: " ",
-              });
+                  trailingText: " ",
+                });
+              } else {
+                replaceRangeWithComposerToken(cmp, {
+                  rangeStart: cmp.cursorOffset,
+                  rangeEnd: cmp.cursorOffset,
+                  label,
+                  metadata: {
+                    kind: "image",
+                    label,
+                    submitText: label,
+                    imageId,
+                    index: idx,
+                  },
+                  styleId: composerTokenVisuals.imageStyleId,
+                  trailingText: " ",
+                });
+              }
             } finally {
               suppressComposerSyncRef.current = false;
             }

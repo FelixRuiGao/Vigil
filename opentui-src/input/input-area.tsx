@@ -4,7 +4,13 @@ import React from "react";
 
 import { createTextAttributes, type KeyBinding, type TextareaRenderable } from "@opentui/core";
 
+// Side-effect import: registers the <fermiComposer> intrinsic element + JSX types.
+import "../composer/composer-element.js";
+
 const ATTRS_BOLD = createTextAttributes({ bold: true });
+
+/** Opt-in flag for the self-written composer (default: native textarea). */
+const USE_FERMI_COMPOSER = process.env.FERMI_COMPOSER === "fermi";
 import type { ConversationPalette } from "../components/conversation-types.js";
 import type { ComposerTokenVisuals } from "../composer-tokens.js";
 import type { ActivityPhase } from "../display/types.js";
@@ -271,26 +277,45 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
         paddingRight={1}
       >
         <text fg="#d4d4d4" attributes={ATTRS_BOLD} content="❯ " flexShrink={0} />
-        <textarea
-          ref={(node: any) => {
-            (inputRef as any).current = node;
-          }}
-          placeholder={placeholder}
-          focused={focused}
-          textColor={selectedChildId ? colors.muted : colors.text}
-          focusedTextColor={selectedChildId ? colors.muted : colors.text}
-          placeholderColor={colors.muted}
-          cursorStyle={{ style: "line", blinking: true }}
-          cursorColor="#ffffff"
-          flexGrow={1}
-          maxHeight={maxInputLines}
-          minHeight={1}
-          syntaxStyle={composerTokenVisuals.syntaxStyle}
-          keyBindings={[...keyBindings]}
-          onSubmit={onSubmit}
-          wrapMode="word"
-          scrollMargin={0}
-        />
+        {USE_FERMI_COMPOSER ? (
+          <fermiComposer
+            ref={(node: any) => {
+              (inputRef as any).current = node;
+            }}
+            focused={focused}
+            placeholder={placeholder}
+            textColor={selectedChildId ? colors.muted : colors.text}
+            placeholderColor={colors.muted}
+            tokenColor={colors.accent}
+            cursorColor="#ffffff"
+            flexGrow={1}
+            minHeight={1}
+            maxHeight={maxInputLines}
+            maxLines={maxInputLines}
+            onSubmit={onSubmit}
+          />
+        ) : (
+          <textarea
+            ref={(node: any) => {
+              (inputRef as any).current = node;
+            }}
+            placeholder={placeholder}
+            focused={focused}
+            textColor={selectedChildId ? colors.muted : colors.text}
+            focusedTextColor={selectedChildId ? colors.muted : colors.text}
+            placeholderColor={colors.muted}
+            cursorStyle={{ style: "line", blinking: true }}
+            cursorColor="#ffffff"
+            flexGrow={1}
+            maxHeight={maxInputLines}
+            minHeight={1}
+            syntaxStyle={composerTokenVisuals.syntaxStyle}
+            keyBindings={[...keyBindings]}
+            onSubmit={onSubmit}
+            wrapMode="word"
+            scrollMargin={0}
+          />
+        )}
       </box>
 
       {/* Bottom row: permission/hint (left, mutually exclusive) + usage + context (right) */}

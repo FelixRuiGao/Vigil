@@ -9,6 +9,8 @@ Release notes. A missing or empty section fails CI.
 
 ## Unreleased
 
+- Fixed: in the terminal input box, pressing `Command+Delete` (delete-to-line-start) at the start of the last line — or any delete that removes a line near the bottom — no longer jumps the cursor up onto the previous line when the input has scrolled. The deletion itself was always correct; the bug was a viewport re-clamp that fired right after the edit and dragged the caret to keep it inside the clamped window. The clamp now only pulls the scroll back into bounds and leaves the caret where it is. This only affected tall, scrolled inputs (short inputs were never wrong).
+
 ## v0.3.15
 
 - Changed: Fermi now summarizes finished, already-consumed context (large tool outputs, completed exploration, settled findings) on its own initiative as a long session grows, instead of holding off until you explicitly authorize it. This keeps the context window healthy and makes a forced, more-lossy auto-compact far less likely on long tasks. Your own messages are never summarized on Fermi's initiative, an explicit instruction not to summarize (in AGENTS.md or the conversation) is still honored, and summaries remain reversible by rewind.
