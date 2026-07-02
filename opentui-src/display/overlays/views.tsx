@@ -2,7 +2,9 @@
 
 import React from "react";
 
-import type { InputRenderable } from "@opentui/core";
+// Side-effect import: registers the <fermiInput> intrinsic element + JSX types.
+import "../../composer/composer-element.js";
+import type { FermiInputRenderable } from "../../composer/composer-renderable.js";
 import type { CommandPickerState } from "../../../src/ui/command-picker.js";
 import {
   getCommandPickerLevel,
@@ -226,7 +228,7 @@ export function CommandPickerView(
     contentWidth: number;
     maxVisible: number;
     onItemClick: (index: number) => void;
-    noteInputRef?: React.RefObject<InputRenderable | null>;
+    noteInputRef?: React.RefObject<FermiInputRenderable | null>;
     noteValue?: string;
     onNoteInput?: (value: string) => void;
   },
@@ -289,18 +291,21 @@ export function CommandPickerView(
               ? (picker.customInputLabel ?? "Your instructions:")
               : "Instructions:"}
           />
-          <input
-            ref={(node) => { if (noteInputRef) (noteInputRef as React.MutableRefObject<InputRenderable | null>).current = node; }}
+          <fermiInput
+            ref={(node: FermiInputRenderable | null) => {
+              if (noteInputRef) (noteInputRef as React.MutableRefObject<FermiInputRenderable | null>).current = node;
+              // The reconciler drops onInput/onChange/onSubmit props for
+              // non-native classes — wire callbacks through the ref instead
+              // (also keeps the closure fresh across renders).
+              if (node) node.onInput = onNoteInput;
+            }}
             value={noteValue ?? ""}
             focused={picker.noteEditing || picker.customInputMode}
             placeholder={picker.customInputMode
               ? (picker.customInputPlaceholder ?? "Type your instructions")
               : "Add review instructions..."}
             textColor={theme.colors.text}
-            focusedTextColor={theme.colors.text}
             placeholderColor={theme.colors.dim}
-            onInput={onNoteInput}
-            onChange={onNoteInput}
           />
         </box>
       )}
@@ -409,7 +414,7 @@ export function PromptSecretView(
     theme,
   }: {
     prompt: PromptSecretState | null;
-    inputRef: React.RefObject<InputRenderable | null>;
+    inputRef: React.RefObject<FermiInputRenderable | null>;
     focused: boolean;
     onSubmit: (value: string) => void;
     theme: DisplayTheme;
@@ -422,16 +427,17 @@ export function PromptSecretView(
   return (
     <OverlayFrame theme={theme} height={promptHeight}>
       <text fg={theme.colors.accent} content={prompt.message} />
-      <input
-        ref={(node) => {
+      <fermiInput
+        ref={(node: FermiInputRenderable | null) => {
           inputRef.current = node;
+          // Reconciler drops onSubmit props for non-native classes — wire it
+          // through the ref (also keeps the closure fresh across renders).
+          if (node) node.onSubmit = onSubmit;
         }}
         placeholder={prompt.allowEmpty ? "Press Enter to confirm, Esc to cancel" : "Enter a value"}
         focused={focused}
         textColor={theme.colors.text}
-        focusedTextColor={theme.colors.text}
         placeholderColor={theme.colors.dim}
-        onSubmit={onSubmit as any}
       />
       <text fg={theme.colors.dim} content="Enter confirm · Esc cancel" />
     </OverlayFrame>

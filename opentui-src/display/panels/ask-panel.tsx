@@ -2,6 +2,10 @@
 
 import React from "react";
 
+// Side-effect import: registers the <fermiInput> intrinsic element + JSX types.
+import "../../composer/composer-element.js";
+import type { FermiInputRenderable } from "../../composer/composer-renderable.js";
+
 import type { AgentQuestionItem } from "../../../src/ask.js";
 import type { DisplayTheme } from "../theme/index.js";
 import type { AskPanelProps } from "../types.js";
@@ -171,19 +175,22 @@ export function AskPanelView({
       {customInputMode || noteInputMode ? (
         <box flexDirection="column">
           <text fg={customInputMode ? theme.colors.accent : theme.colors.accent} content={customInputMode ? "Your answer:" : "Note:"} />
-          <input
-            ref={(node) => {
+          <fermiInput
+            ref={(node: FermiInputRenderable | null) => {
               inputRef.current = node;
+              // The reconciler drops onInput/onChange/onSubmit props for
+              // non-native classes — wire callbacks through the ref instead
+              // (also keeps the closures fresh across renders).
+              if (node) {
+                node.onInput = onInput;
+                node.onSubmit = onSubmit;
+              }
             }}
             value={inlineValue}
             focused={customInputMode || noteInputMode}
             placeholder={customInputMode ? "Type a custom answer" : "Add a note"}
             textColor={theme.colors.text}
-            focusedTextColor={theme.colors.text}
             placeholderColor={theme.colors.dim}
-            onInput={onInput}
-            onChange={onInput}
-            onSubmit={onSubmit as any}
           />
           <text
             fg={theme.colors.dim}

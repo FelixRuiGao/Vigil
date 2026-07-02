@@ -5,12 +5,13 @@
 
 import { extend } from "@opentui/react";
 
-import { FermiComposerRenderable } from "./composer-renderable.js";
+import { FermiComposerRenderable, FermiInputRenderable } from "./composer-renderable.js";
 
-extend({ fermiComposer: FermiComposerRenderable });
+extend({ fermiComposer: FermiComposerRenderable, fermiInput: FermiInputRenderable });
 
 declare module "@opentui/react" {
   interface OpenTUIComponents {
     fermiComposer: typeof FermiComposerRenderable;
+    fermiInput: typeof FermiInputRenderable;
   }
 }

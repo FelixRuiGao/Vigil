@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import type { InputRenderable } from "@opentui/core";
+import type { FermiInputRenderable } from "../composer/composer-renderable.js";
 import type {
   PendingAskUi,
   AgentQuestionItem,
@@ -80,7 +80,7 @@ export interface AskPanelProps {
   reviewMode: boolean;
   inlineValue: string;
   optionNotes: Map<string, string>;
-  inputRef: RefObject<InputRenderable | null>;
+  inputRef: RefObject<FermiInputRenderable | null>;
   onInput: (value: string) => void;
   onSubmit: (value: string) => void;
   terminalHeight: number;

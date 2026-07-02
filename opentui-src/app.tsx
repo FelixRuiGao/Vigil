@@ -57,7 +57,6 @@ import {
   type CheckboxPickerState,
 } from "../src/ui/checkbox-picker.js";
 import {
-  type InputRenderable,
   type ScrollBoxRenderable,
 } from "@opentui/core";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
@@ -99,7 +98,7 @@ import {
   displayWidthWithNewlines,
   findFileReferenceQuery,
 } from "./composer-token-logic.js";
-import type { FermiComposerRenderable } from "./composer/composer-renderable.js";
+import type { FermiComposerRenderable, FermiInputRenderable } from "./composer/composer-renderable.js";
 import { createDisplayTheme, type DisplayTheme, type DisplayThemeTokens, type DeepPartial, type ThemeMode } from "./display/theme/index.js";
 import { ContextUsageCard, CodexUsageCard } from "./display/panels/usage-cards.js";
 import { StatusPanel } from "./display/panels/status-panel.js";
@@ -545,8 +544,8 @@ export function OpenTuiApp({
   const mainScrollRef = useRef<ScrollBoxRenderable>(null);
   const detailScrollRef = useRef<ScrollBoxRenderable>(null);
   const inputRef = useRef<FermiComposerRenderable | null>(null);
-  const promptSecretInputRef = useRef<InputRenderable | null>(null);
-  const askInputRef = useRef<InputRenderable | null>(null);
+  const promptSecretInputRef = useRef<FermiInputRenderable | null>(null);
+  const askInputRef = useRef<FermiInputRenderable | null>(null);
   const lastInputValueRef = useRef("");
   const lastCtrlCRef = useRef(0);
   const lastEscRef = useRef(0);
@@ -564,7 +563,7 @@ export function OpenTuiApp({
   const promptSelectResolverRef = useRef<((value: string | undefined) => void) | null>(null);
   const promptSecretResolverRef = useRef<((value: string | undefined) => void) | null>(null);
   const commandPickerResolverRef = useRef<((value: CommandPickerResult | undefined) => void) | null>(null);
-  const pickerNoteInputRef = useRef<InputRenderable | null>(null);
+  const pickerNoteInputRef = useRef<FermiInputRenderable | null>(null);
   const [pickerNoteValue, setPickerNoteValue] = useState("");
   const colors = theme.colors;
   const markdownStyle = theme.markdownStyle;

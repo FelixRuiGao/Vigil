@@ -29,6 +29,7 @@ import {
   displayOffsetToGraphemeIndex,
   graphemeIndexToDisplayOffset,
   measureColumns,
+  segmentGraphemes,
 } from "./graphemes.js";
 import { FermiComposerModel, type ComposerToken, type ComposerTokenKind, type TokenSpec } from "./model.js";
 import {
@@ -53,7 +54,17 @@ export interface FermiComposerOptions extends RenderableOptions<any> {
   placeholder?: string;
   minLines?: number;
   maxLines?: number;
-  onSubmit?: () => void;
+  /**
+   * Single-line mode (the <fermiInput> element): newlines are stripped from
+   * every insert, Enter always submits, the content never wraps — it scrolls
+   * horizontally to keep the caret visible — and maxLength caps the length.
+   */
+  singleLine?: boolean;
+  /** Grapheme cap for singleLine mode (native InputRenderable default: 1000). */
+  maxLength?: number;
+  /** Initial text (singleLine consumers pass this like the native `value`). */
+  value?: string;
+  onSubmit?: (value: string) => void;
   /** Called with the selected text when a drag-selection completes (autocopy). */
   onSelectionCopy?: (text: string) => void;
   /** Reconciler-applied focus prop (handled via focus()/blur()). */
@@ -82,6 +93,10 @@ export class FermiComposerRenderable extends Renderable {
 
   private _minLines: number;
   private _maxLines: number;
+  protected readonly _singleLine: boolean;
+  private _maxLength: number;
+  private _scrollX = 0;
+  private _lastNotifiedText: string;
 
   private _textColor: RGBA;
   private _placeholderColorRgba: RGBA;
@@ -93,9 +108,15 @@ export class FermiComposerRenderable extends Renderable {
   private _placeholder: string;
 
   private _showCursor = true;
-  private _onSubmit?: () => void;
+  private _onSubmit?: (value: string) => void;
   private _onContentChange?: (text: string) => void;
   private _onCursorChange?: (offset: number) => void;
+  // Native-InputRenderable-shaped callbacks (single-line consumers). The
+  // reconciler's setProperty special-cases the names onInput/onChange/onSubmit
+  // for native classes and silently DROPS them for custom ones — callers must
+  // assign these through the ref, not as JSX props.
+  private _onInput?: (value: string) => void;
+  private _onChangeCb?: (value: string) => void;
 
   private _lastClickAt = 0;
   private _clickStreak = 0;
@@ -110,8 +131,10 @@ export class FermiComposerRenderable extends Renderable {
     // focus() a no-op (no keyboard, no cursor). The composer must be focusable.
     this.focusable = true;
 
-    this._minLines = options.minLines ?? 1;
-    this._maxLines = options.maxLines ?? 8;
+    this._singleLine = options.singleLine === true;
+    this._maxLength = options.maxLength ?? (this._singleLine ? 1000 : Number.POSITIVE_INFINITY);
+    this._minLines = this._singleLine ? 1 : options.minLines ?? 1;
+    this._maxLines = this._singleLine ? 1 : options.maxLines ?? 8;
     this._textColor = parseColor(options.textColor ?? "#d4d4d4");
     this._placeholderColorRgba = parseColor(options.placeholderColor ?? "#6b6b6b");
     this._tokenColor = parseColor(options.tokenColor ?? "#b4a0ec");
@@ -122,6 +145,9 @@ export class FermiComposerRenderable extends Renderable {
     this._placeholder = options.placeholder ?? "";
     this._onSubmit = options.onSubmit;
     this._onSelectionCopy = options.onSelectionCopy;
+
+    this._lastNotifiedText = "";
+    if (options.value) this.value = options.value;
 
     this._model.onChange(() => this._onModelChanged());
 
@@ -154,10 +180,37 @@ export class FermiComposerRenderable extends Renderable {
     this.requestRender();
     this._onContentChange?.(this._model.text);
     this._onCursorChange?.(this.cursorOffset);
+    if (this._model.text !== this._lastNotifiedText) {
+      this._lastNotifiedText = this._model.text;
+      this._onInput?.(this._model.text);
+      this._onChangeCb?.(this._model.text);
+    }
+  }
+
+  /**
+   * The one text-insertion gate: single-line mode strips newlines and both
+   * modes enforce maxLength (in graphemes, counting the selection about to be
+   * replaced as removed).
+   */
+  private _insertFiltered(str: string): void {
+    let s = str;
+    if (this._singleLine) s = s.replace(/[\n\r]/g, "");
+    if (!s) return;
+    if (Number.isFinite(this._maxLength)) {
+      const sel = this._model.selection;
+      const kept = this._model.length - (sel ? sel.end - sel.start : 0);
+      const remaining = Math.max(0, this._maxLength - kept);
+      const parts = segmentGraphemes(s);
+      if (parts.length > remaining) s = parts.slice(0, remaining).join("");
+      if (!s) return;
+    }
+    this._model.insertText(s);
   }
 
   private _ensureLayout(): Layout {
-    const w = Math.max(1, this.width);
+    // Single-line content never wraps: lay it out on one unbounded row and let
+    // rendering window it horizontally.
+    const w = this._singleLine ? 0x7fffffff : Math.max(1, this.width);
     if (this._layout && this._layoutWidth === w && this._layoutVersion === this._version) {
       return this._layout;
     }
@@ -180,7 +233,9 @@ export class FermiComposerRenderable extends Renderable {
     const intrinsicWidth = Math.max(1, this._intrinsicWidth());
     const effectiveWidth =
       widthMode === Yoga.MeasureMode.Undefined || isNaN(width) ? intrinsicWidth : Math.floor(width);
-    const lines = visualLineCount(this._model.graphemes, this._model.tokens, Math.max(1, effectiveWidth));
+    const lines = this._singleLine
+      ? 1
+      : visualLineCount(this._model.graphemes, this._model.tokens, Math.max(1, effectiveWidth));
     const height = Math.max(this._minLines, Math.min(lines, this._maxLines));
     if (widthMode === Yoga.MeasureMode.AtMost) {
       return { width: Math.min(effectiveWidth, intrinsicWidth), height };
@@ -207,7 +262,8 @@ export class FermiComposerRenderable extends Renderable {
   protected renderSelf(buffer: OptimizedBuffer): void {
     if (!this.visible || this.isDestroyed) return;
     const lay = this._ensureLayout();
-    this._clampScroll(lay);
+    if (this._singleLine) this._clampScrollX(lay);
+    else this._clampScroll(lay);
 
     const screenX = this._screenX;
     const screenY = this._screenY;
@@ -218,6 +274,23 @@ export class FermiComposerRenderable extends Renderable {
     }
 
     const sel = this._model.selection;
+
+    if (this._singleLine) {
+      // One unbounded row, windowed to [scrollX, scrollX + width).
+      const line = lay.lines[0];
+      if (!line) return;
+      for (const cell of line.cells) {
+        const x = cell.startCol - this._scrollX;
+        if (x < 0) continue; // straddling or left of the window edge
+        if (x >= this.width) break;
+        const selected = sel !== null && cell.graphemeIndex >= sel.start && cell.graphemeIndex < sel.end;
+        const fg = selected ? this._selectionFg : cell.tokenId ? this._tokenColor : this._textColor;
+        const bg = selected ? this._selectionBg : undefined;
+        buffer.drawText(cell.grapheme, screenX + x, screenY, fg, bg);
+      }
+      return;
+    }
+
     const last = Math.min(lay.lines.length, this._scrollY + this.height);
     for (let row = this._scrollY; row < last; row++) {
       const line = lay.lines[row]!;
@@ -238,12 +311,13 @@ export class FermiComposerRenderable extends Renderable {
     const lay = this._ensureLayout();
     const pos = cursorToVisual(lay, this._model.cursor, this._affinity);
     const visualRow = pos.row - this._scrollY;
+    const visualCol = pos.col - this._scrollX;
 
-    const cx = this._screenX + pos.col;
+    const cx = this._screenX + visualCol;
     const cy = this._screenY + visualRow;
 
     // Out of the visible viewport → hide the caret.
-    if (visualRow < 0 || visualRow >= this.height || pos.col > this.width) {
+    if (visualRow < 0 || visualRow >= this.height || visualCol < 0 || visualCol > this.width) {
       this._ctx.setCursorPosition(cx + 1, cy + 1, false);
       return;
     }
@@ -271,6 +345,17 @@ export class FermiComposerRenderable extends Renderable {
     }
     const maxScroll = Math.max(0, lay.lines.length - this.height);
     this._scrollY = Math.max(0, Math.min(this._scrollY, maxScroll));
+  }
+
+  /** Single-line horizontal viewport: always keeps the caret in view. */
+  private _clampScrollX(lay: Layout): void {
+    const col = cursorToVisual(lay, this._model.cursor, this._affinity).col;
+    if (col < this._scrollX) this._scrollX = col;
+    else if (col > this._scrollX + this.width - 1) this._scrollX = col - this.width + 1;
+    const contentWidth = lay.lines[0]?.width ?? 0;
+    // +1 leaves a cell for the caret past the last grapheme.
+    const maxScroll = Math.max(0, contentWidth - this.width + 1);
+    this._scrollX = Math.max(0, Math.min(this._scrollX, maxScroll));
   }
 
   // ---- focus --------------------------------------------------------------
@@ -347,11 +432,11 @@ export class FermiComposerRenderable extends Renderable {
       case "return":
       case "enter":
       case "kpenter":
-        if (key.shift || key.option || key.meta) m.insertText("\n");
-        else this._onSubmit?.();
+        if (!this._singleLine && (key.shift || key.option || key.meta)) m.insertText("\n");
+        else this._submit();
         return true;
       case "linefeed": // Ctrl+J — the app maps it to submit
-        this._onSubmit?.();
+        this._submit();
         return true;
       default:
         break;
@@ -391,7 +476,7 @@ export class FermiComposerRenderable extends Renderable {
           m.deleteForward();
           return true;
         case "n":
-          m.insertText("\n"); // app binding: Ctrl+N → newline
+          this._insertFiltered("\n"); // app binding: Ctrl+N → newline (single-line: no-op)
           return true;
         case "u":
           // Ctrl+U (delete-to-line-start) is owned by the app useKeyboard
@@ -441,11 +526,15 @@ export class FermiComposerRenderable extends Renderable {
     if (!key.ctrl && !key.meta && !key.super && !key.hyper && key.sequence && key.sequence.length > 0) {
       const code = key.sequence.codePointAt(0)!;
       if (code >= 0x20 && code !== 0x7f) {
-        m.insertText(key.sequence);
+        this._insertFiltered(key.sequence);
         return true;
       }
     }
     return false;
+  }
+
+  private _submit(): void {
+    this._onSubmit?.(this.serializeSubmitText());
   }
 
   private _moveVertical(dir: 1 | -1, select: boolean): boolean {
@@ -482,7 +571,7 @@ export class FermiComposerRenderable extends Renderable {
     // the row must be floored to index visual lines. The fractional column is
     // kept as-is — it makes the half-cell boundary snap exact.
     const row = Math.floor(e.y - this._screenY) + this._scrollY;
-    const col = Math.max(0, e.x - this._screenX);
+    const col = Math.max(0, e.x - this._screenX + this._scrollX);
     return { lay, idx: visualToCursor(lay, row, col), row };
   }
 
@@ -545,6 +634,11 @@ export class FermiComposerRenderable extends Renderable {
   public handlePaste(event: PasteEvent): void {
     const raw = stripAnsiSequences(decodePasteBytes(event.bytes));
     if (!raw) return;
+    if (this._singleLine) {
+      // No paste tokens in a one-line input: strip newlines, honor maxLength.
+      this._insertFiltered(raw);
+      return;
+    }
     const decision = classifyPastedText(raw, this._pasteCounter);
     if (decision.replacedWithPlaceholder && decision.index !== undefined) {
       this._model.insertToken({ kind: "paste", label: decision.text, submitText: raw });
@@ -557,6 +651,7 @@ export class FermiComposerRenderable extends Renderable {
     // Native-parity semantics: only vertical wheel events, only when we can
     // actually scroll that way; consumed events stop propagating, everything
     // else bubbles (matches EditBufferRenderable.handleScroll).
+    if (this._singleLine) return; // one row — nothing to wheel-scroll
     const direction = e.scroll?.direction;
     if (direction !== "up" && direction !== "down") return;
     const lay = this._ensureLayout();
@@ -574,6 +669,23 @@ export class FermiComposerRenderable extends Renderable {
 
   get plainText(): string {
     return this._model.text;
+  }
+
+  /** Native-InputRenderable-shaped value accessor (single-line consumers). */
+  get value(): string {
+    return this._model.text;
+  }
+  set value(next: string) {
+    let v = next ?? "";
+    if (this._singleLine) v = v.replace(/[\n\r]/g, "");
+    if (Number.isFinite(this._maxLength)) {
+      const parts = segmentGraphemes(v);
+      if (parts.length > this._maxLength) v = parts.slice(0, this._maxLength).join("");
+    }
+    // Skip-if-equal keeps a controlled `value` prop from yanking the caret to
+    // the end on every re-render echoing our own onInput.
+    if (v === this._model.text) return;
+    this._model.setText(v, { cursorToEnd: true });
   }
 
   get cursorOffset(): number {
@@ -742,11 +854,24 @@ export class FermiComposerRenderable extends Renderable {
   set onCursorChange(handler: ((offset: number) => void) | undefined) {
     this._onCursorChange = handler;
   }
-  set onSubmit(handler: (() => void) | undefined) {
+  set onSubmit(handler: ((value: string) => void) | undefined) {
     this._onSubmit = handler;
   }
   set onSelectionCopy(handler: ((text: string) => void) | undefined) {
     this._onSelectionCopy = handler;
+  }
+  set onInput(handler: ((value: string) => void) | undefined) {
+    this._onInput = handler;
+  }
+  set onChange(handler: ((value: string) => void) | undefined) {
+    this._onChangeCb = handler;
+  }
+  set maxLength(value: number) {
+    this._maxLength = value;
+  }
+  /** Native prop compat: every consumer passes it equal to textColor. */
+  set focusedTextColor(value: ColorInput) {
+    this.textColor = value;
   }
   setShowCursor(show: boolean): void {
     this._showCursor = show;
@@ -755,6 +880,17 @@ export class FermiComposerRenderable extends Renderable {
 
   protected override onRemove(): void {
     if (this._focused) this._ctx.setCursorPosition(0, 0, false);
+  }
+}
+
+/**
+ * Single-line variant backing the <fermiInput> element (the secret / ask /
+ * picker-note inputs). All behavior lives in FermiComposerRenderable's
+ * singleLine mode; this class just pins the option for the reconciler.
+ */
+export class FermiInputRenderable extends FermiComposerRenderable {
+  constructor(ctx: RenderContext, options: FermiComposerOptions) {
+    super(ctx, { ...options, singleLine: true });
   }
 }
 

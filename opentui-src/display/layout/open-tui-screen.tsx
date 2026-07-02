@@ -2,8 +2,8 @@
 
 import React from "react";
 
-import type { InputRenderable, ScrollBoxRenderable } from "@opentui/core";
-import type { FermiComposerRenderable } from "../../composer/composer-renderable.js";
+import type { ScrollBoxRenderable } from "@opentui/core";
+import type { FermiComposerRenderable, FermiInputRenderable } from "../../composer/composer-renderable.js";
 import type { PendingAskUi } from "../../../src/ask.js";
 import type { AgentQuestionItem } from "../../../src/ask.js";
 import type { CommandPickerState } from "../../../src/ui/command-picker.js";
@@ -86,19 +86,19 @@ export interface OpenTuiScreenProps {
   reviewMode: boolean;
   askInputValue: string;
   optionNotes: Map<string, string>;
-  askInputRef: React.RefObject<InputRenderable | null>;
+  askInputRef: React.RefObject<FermiInputRenderable | null>;
   onAskInput: (value: string) => void;
   onAskSubmit: (value: string) => void;
   getAskQuestions: () => AgentQuestionItem[];
   commandOverlay: CommandOverlayState;
   commandPicker: CommandPickerState | null;
-  pickerNoteInputRef: React.RefObject<InputRenderable | null>;
+  pickerNoteInputRef: React.RefObject<FermiInputRenderable | null>;
   pickerNoteValue: string;
   onPickerNoteInput: (value: string) => void;
   checkboxPicker: CheckboxPickerState | null;
   promptSelect: PromptSelectState | null;
   promptSecret: PromptSecretState | null;
-  promptSecretInputRef: React.RefObject<InputRenderable | null>;
+  promptSecretInputRef: React.RefObject<FermiInputRenderable | null>;
   oauthOverlay: OAuthOverlayState | null;
   helpPanel: boolean;
   onOverlayItemClick: (index: number) => void;

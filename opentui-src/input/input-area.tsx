@@ -273,6 +273,12 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
         <fermiComposer
           ref={(node: any) => {
             (inputRef as any).current = node;
+            // The reconciler's setProperty special-cases the name "onSubmit"
+            // for native classes and silently drops it for custom ones (only
+            // the constructor options would see it, freezing the mount-time
+            // closure). Wiring through the inline ref keeps it fresh: the
+            // callback identity changes every render, so React re-runs it.
+            if (node) node.onSubmit = onSubmit;
           }}
           focused={focused}
           placeholder={placeholder}
@@ -284,7 +290,6 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
           minHeight={1}
           maxHeight={maxInputLines}
           maxLines={maxInputLines}
-          onSubmit={onSubmit}
         />
       </box>
 
