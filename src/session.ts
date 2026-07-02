@@ -5979,10 +5979,14 @@ export class Session {
         {
           id: "model-overlay",
           order: 200,
-          // Keyed on the CURRENT model — switchModel/reloadCurrentModelConfig
-          // rebuild the cached prompt so a mid-session model change picks the
-          // right overlay up.
-          content: () => buildModelOverlay(this.primaryAgent.modelConfig.model),
+          // Keyed on the CURRENT provider+model — switchModel/
+          // reloadCurrentModelConfig rebuild the cached prompt so a
+          // mid-session model change picks the right overlay up.
+          content: () =>
+            buildModelOverlay(
+              this.primaryAgent.modelConfig.provider,
+              this.primaryAgent.modelConfig.model,
+            ),
         },
       ],
     });

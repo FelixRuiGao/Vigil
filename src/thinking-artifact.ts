@@ -359,7 +359,7 @@ export function buildAnthropicPlainThinkingPayload(
   }];
 }
 
-function stripVendorPrefix(model: string): string {
+export function stripVendorPrefix(model: string): string {
   const idx = model.lastIndexOf("/");
   return idx >= 0 ? model.slice(idx + 1) : model;
 }
