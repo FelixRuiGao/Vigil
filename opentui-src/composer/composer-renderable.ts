@@ -894,17 +894,3 @@ export class FermiInputRenderable extends FermiComposerRenderable {
   }
 }
 
-/** Type guard so app glue can branch native-vs-self composer paths. */
-export function isFermiComposer(composer: unknown): composer is FermiComposerRenderable {
-  return composer instanceof FermiComposerRenderable;
-}
-
-/**
- * Returns the composer typed as a FermiComposerRenderable, or null. Use this
- * (instead of the boolean guard) when the app holds the ref as a
- * TextareaRenderable but needs to call self-composer-only methods — a plain
- * type guard would narrow the disjoint class to `never`.
- */
-export function asFermiComposer(composer: unknown): FermiComposerRenderable | null {
-  return composer instanceof FermiComposerRenderable ? composer : null;
-}
