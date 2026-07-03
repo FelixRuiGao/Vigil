@@ -9,6 +9,8 @@ Release notes. A missing or empty section fails CI.
 
 ## Unreleased
 
+## v0.4.1
+
 - Fixed: agents no longer try to read the plan/todo file before it exists. The prompts now state explicitly that `plan.md` is agent-created (nothing generates it automatically), auto mode's resume ritual says to read only the files that actually exist, and the auto/scale compact note tells the summarizer not to direct the next instance at files that were never created.
 - Changed: reading the plan/todo file now shows as **Check Todos** in the transcript instead of **Update Todos** (which stays for writes/edits).
 - Fixed: the input box's bottom status row (permission mode, agent mode, keyboard hints, token usage) no longer word-wraps onto extra lines when the terminal is too narrow to fit everything. It now drops segments by a fixed priority instead — context token usage is never dropped, then permission label, then mode label, then the usage indicator, then the goal timer, then the `(Shift+Tab)`/`(Tab)` keyboard hints (cut first). The priority is a strict chain: if one segment doesn't fit, every lower-priority segment is cut too, even a shorter one that would otherwise fit on its own — so which hint disappears is now deterministic instead of varying with the exact width.

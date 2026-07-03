@@ -1,6 +1,6 @@
 {
   "name": "fermi-code",
-  "version": "0.3.15",
+  "version": "0.4.1",
   "updateNotice": "",
   "description": "A terminal AI coding agent built for long sessions — three-layer context management, persistent memory, and parallel sub-agents",
   "type": "module",
