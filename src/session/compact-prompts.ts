@@ -89,6 +89,8 @@ export function appendModeCompactNote(basePrompt: string, mode: string): string 
     `This session's durable state lives on disk: ${files}. Do not duplicate their contents ` +
     `into the continuation prompt — reference them by path and state what they don't record: ` +
     `the in-flight step, unwritten conclusions, and anything decided but not yet filed. ` +
-    `Instruct the new instance to read those files first upon resuming.`
+    `Instruct the new instance to read those files first upon resuming. Only reference files ` +
+    `that were actually created — if one doesn't exist, say so instead of directing the new ` +
+    `instance to read it.`
   );
 }

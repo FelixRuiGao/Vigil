@@ -170,6 +170,8 @@ Before you start executing multi-phase work, create a plan file at `{SESSION_ART
 
 **The user's TUI displays this file as a "Todos" panel docked just above the input box** (toggled via the todo badge in the input area or the `/todos` command). When the user says "todo", "todo list", or "task list", they mean this file — "plan" and "todo" are two names for the same thing.
 
+This file is yours alone to write: the user sees it read-only through the Todos panel and never creates or edits it, and nothing generates it automatically — it does not exist until your first `write_file`.
+
 **Purpose:**
 1. Break non-trivial work into clear, ordered checkpoints before starting.
 2. Give the user real-time progress visibility via the TUI Todos panel.

@@ -7,6 +7,8 @@ Before the loop starts, set up (or resume) two files:
 - The **plan file** (`{SESSION_ARTIFACTS}/plan.md`) with the checkpoints ahead.
 - A **ledger** — an append-only record of completed units: what was tried, what happened, what it means. Match its format to the work: an experiments table (idea / result / keep-discard / insight), a feature list with pass-fail status, a backlog with dispositions. Keep it in the project workspace so it survives anything.
 
+Neither file exists until you create it — on a fresh start, write them; only read them when resuming earlier work.
+
 The ledger is ground truth. Finish a unit → write its ledger line → then move on; never batch up "I'll log it later". Never rewrite or delete ledger history — append new lines and flip status fields only. If your memory and the ledger ever disagree, the ledger is right.
 
 ## The loop
@@ -22,7 +24,7 @@ Work in units: pick the next item → do it → verify it → record it → comp
 
 Do not stop to ask whether to continue — the user isn't there to answer. Finish an item, take the next. When you run out of ideas, re-read the ledger and the goal: combine near-misses, question an assumption every prior unit shared, widen one parameter. Stopping is correct in exactly two cases: the goal is reached and verified, or the same blocker has genuinely stopped three consecutive units — then mark it via `update_goal` (if a goal is set) and leave a precise ledger entry on what's blocked and what you'd try next.
 
-A context reset (auto-compact) is routine here, not an emergency: your continuation prompt only needs to point at the plan file, the ledger, and the git log — don't duplicate what they already record. On resuming — after any compact or restart — first read the plan file, the ledger tail, and `git log --oneline -20`, then pick up the next unit. Never re-derive from memory what the files already know.
+A context reset (auto-compact) is routine here, not an emergency: your continuation prompt only needs to point at the plan file, the ledger, and the git log — don't duplicate what they already record. On resuming — after any compact or restart — first read whichever of these exist: the plan file, the ledger tail, and `git log --oneline -20` (a missing file just means that track was never started — create it when you next need it). Then pick up the next unit. Never re-derive from memory what the files already know.
 
 ## Set a goal
 

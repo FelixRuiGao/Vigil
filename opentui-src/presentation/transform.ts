@@ -591,13 +591,14 @@ export function presentationTransform(
           : null;
         const toolOp = buildToolOperation(callEntry, resultEntry, activeEntryId);
 
-        // Plan-file writes/edits render as a single "Update Todos" pseudo-tool.
-        // The Todos panel already shows the content, so suppress the path, the
-        // line-count suffix, and the inline diff, and relabel the operation.
+        // Plan-file ops render as a single pseudo-tool: "Update Todos" for
+        // writes/edits, "Check Todos" for reads. The Todos panel already shows
+        // the content, so suppress the path, the line-count suffix, and the
+        // inline diff, and relabel the operation.
         // On failure, keep the inline result so the error reason still shows
         // (the diff body is already gated off in the error state downstream).
         if (isPlanFileOperation(callEntry, resultEntry)) {
-          toolOp.toolDisplayName = "Update Todos";
+          toolOp.toolDisplayName = callToolName === "read_file" ? "Check Todos" : "Update Todos";
           toolOp.toolText = "";
           toolOp.toolSuffix = "";
           toolOp.fileModifyData = undefined;
