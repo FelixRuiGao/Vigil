@@ -26,6 +26,8 @@ import {
   ASK_TOOL,
   SEND_TOOL,
   RELOAD_TOOL,
+  CREATE_GOAL_TOOL,
+  UPDATE_GOAL_TOOL,
 } from "./tools/comm.js";
 import {
   executeTool,
@@ -156,6 +158,7 @@ export function ensureCommTools(
   if (capabilities.includeSummarizeContextTool) wanted.push(SUMMARIZE_CONTEXT_TOOL);
   if (capabilities.includeAskTool) wanted.push(ASK_TOOL);
   if (capabilities.includeReloadTool) wanted.push(RELOAD_TOOL);
+  if (capabilities.includeGoalTools) wanted.push(CREATE_GOAL_TOOL, UPDATE_GOAL_TOOL);
   for (const toolDef of wanted) {
     if (!existing.has(toolDef.name)) {
       tools.push(toolDef);
@@ -183,6 +186,7 @@ export function commToolNamesForCapabilities(
   if (capabilities.includeAskTool) names.push(ASK_TOOL.name);
   if (capabilities.includeReloadTool) names.push(RELOAD_TOOL.name);
   if (capabilities.includeSkillTools) names.push("skill");
+  if (capabilities.includeGoalTools) names.push(CREATE_GOAL_TOOL.name, UPDATE_GOAL_TOOL.name);
   return names;
 }
 

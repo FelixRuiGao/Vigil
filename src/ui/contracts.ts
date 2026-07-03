@@ -177,6 +177,13 @@ export interface Session {
   currentModelConfigName?: string;
   switchModel?(modelConfigName: string): void;
   reloadCurrentModelConfig?(): void;
+  /** Agent mode (default / vibe / scale / auto). */
+  mode?: string;
+  setMode?(mode: string): void;
+  /** Active session goal, or null. */
+  goal?: { condition: string; createdAt: number } | null;
+  setGoal?(condition: string): void;
+  clearGoal?(): void;
   config?: {
     modelNames: string[];
     getModel(name: string): { provider: string; model: string; contextLength: number; supportsThinking: boolean; supportsMultimodal: boolean };

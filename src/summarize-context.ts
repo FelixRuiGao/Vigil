@@ -49,6 +49,13 @@ export interface SummarizeContextExecutionOptions {
     to: string;
     contextIds: string[];
   };
+  /**
+   * Context IDs that agent-initiated summarization must not cover (e.g. the
+   * active mode-transition notice — the stance must survive in context
+   * verbatim). User-authorized /summarize ranges bypass this, like every
+   * other agent-side restriction.
+   */
+  protectedContextIds?: ReadonlySet<string>;
 }
 
 function parseOperations(args: Record<string, unknown>): SummarizeContextOperation[] {
@@ -140,6 +147,16 @@ function validateLogOperation(
       valid: false,
       error: "Cannot summarize a range that contains user messages. Adjust the range to exclude user-message groups.",
     };
+  }
+
+  if (options.protectedContextIds?.size) {
+    const hit = context_ids.find((id) => options.protectedContextIds!.has(id));
+    if (hit) {
+      return {
+        valid: false,
+        error: `Cannot summarize context group "${hit}": it carries the active mode stance, which must stay in context verbatim. Narrow the range to exclude it.`,
+      };
+    }
   }
 
   // Summaries count as the turn they are assigned to in the view (the turn

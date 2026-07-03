@@ -20,6 +20,7 @@ import { randomSessionId, saveGlobalSettingsPatch, saveLog, SessionStore, type A
 import { applySessionRestore } from "../session-resume.js";
 import { getTierEligibleThinkingLevels, getThinkingLevels } from "../config.js";
 import { createModelTierEntry } from "../model-selection.js";
+import { AGENT_MODES, isAgentMode } from "../modes/index.js";
 
 export interface SessionRpcOptions {
   readonly session: Session;
@@ -721,6 +722,33 @@ export function registerSessionRpc(opts: SessionRpcOptions): { dispose: () => vo
     server.emit("model.changed", { name });
     return buildMeta(session, workDir, sessionDir);
   });
+
+  server.on("session.setMode", (params) => {
+    const p = expectObject(params, "session.setMode");
+    const mode = expectString(p, "mode", "session.setMode");
+    if (!isAgentMode(mode)) {
+      throw new Error(`Unknown mode '${mode}'. Available: ${AGENT_MODES.join(", ")}`);
+    }
+    session.setMode(mode);
+    server.emit("mode.changed", { mode });
+    return { mode };
+  });
+
+  server.on("session.getMode", () => ({ mode: session.mode ?? "default" }));
+
+  server.on("session.setGoal", (params) => {
+    const p = expectObject(params, "session.setGoal");
+    const condition = expectString(p, "condition", "session.setGoal");
+    session.setGoal(condition);
+    return { goal: session.goal ?? null };
+  });
+
+  server.on("session.clearGoal", () => {
+    session.clearGoal();
+    return { goal: null };
+  });
+
+  server.on("session.getGoal", () => ({ goal: session.goal ?? null }));
 
   server.on("session.getModelTiers", () => buildModelTierStatus(session));
 

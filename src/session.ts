@@ -77,6 +77,7 @@ import {
   COMPACT_PROMPT_OUTPUT,
   COMPACT_PROMPT_TOOLCALL,
   appendManualInstruction,
+  appendModeCompactNote,
 } from "./session/compact-prompts.js";
 import { buildActiveContextView } from "./active-context.js";
 import { execSummarizeContextOnLog } from "./summarize-context.js";
@@ -105,8 +106,15 @@ import { BackgroundShellManager, type BackgroundShellSnapshot, type BackgroundSh
 import { PermissionAdvisor, PermissionRuleStore, initBashParser, type PermissionMode, type PermissionRule, type ApprovalOffer } from "./permissions/index.js";
 import { HookRuntime, type HookEvent, type HookPayload } from "./hooks/index.js";
 import type { HookManifest } from "./hooks/types.js";
-import { assembleFullSystemPrompt, readAgentsMemory } from "./prompt-assembler.js";
+import { assembleFullSystemPrompt, readAgentsMemory, renderPromptVariables } from "./prompt-assembler.js";
 import { buildModelOverlay } from "./prompt-overlays.js";
+import {
+  type AgentMode,
+  buildModeSection,
+  buildModeTransitionNotice,
+  coerceAgentMode,
+} from "./modes/index.js";
+import { buildContextGuidance } from "./modes/context-guidance.js";
 import { shell } from "./platform/index.js";
 import { buildShellNotes } from "./tools/shell-notes.js";
 import {
@@ -547,6 +555,17 @@ export class Session {
   // before the first user message never queue a ride-along notice. Flipped in
   // _beginActiveInput; seeded on restore in _applyRestoredState.
   private _conversationStarted = false;
+
+  // -- Agent mode (switchable working stance; see src/modes/index.ts) --
+  /** What the user has selected (UI state; changes freely via /mode or Tab). */
+  private _selectedMode: AgentMode = "default";
+  /** What the cached system prompt was baked with (changes at conversation boundaries). */
+  private _bakedMode: AgentMode = "default";
+  /** What the conversation currently reflects (updated when a transition notice lands). */
+  private _activeMode: AgentMode = "default";
+
+  // -- Session goal (/goal — condition-driven turn continuation) --
+  private _goal: { condition: string; createdAt: number } | null = null;
   private _currentTurnSignal: AbortSignal | null = null;
   private _currentTurnAbortController: AbortController | null = null;
 
@@ -831,6 +850,7 @@ export class Session {
       deliverSystemNotice: (content) => {
         this._deliverMessage({ type: "system_notice", sender: "system", content, timestamp: Date.now() });
       },
+      getMode: () => this._selectedMode,
     });
 
     // Apply context budget percentage.
@@ -920,6 +940,11 @@ export class Session {
     this._title = undefined;
     this._cachedSummary = undefined;
     this._conversationStarted = false;
+    // Fresh conversation: the current selection becomes the baked stance.
+    this._bakedMode = this._selectedMode;
+    this._activeMode = this._selectedMode;
+    // A fresh conversation clears any active goal (mirrors /clear semantics).
+    this._goal = null;
     this._log = [];
     this._logStore.resetRevision();
     this._idAllocator = new LogIdAllocator();
@@ -2310,6 +2335,13 @@ export class Session {
     this._compactCount = state.compactCount;
     this._preferredThinkingLevel = state.preferredThinkingLevel;
     this._thinkingLevel = state.thinkingLevel;
+    // Mode: the restored selection becomes all three states — the reassembled
+    // system prompt bakes it, so no transition notice is owed on resume.
+    this._selectedMode = coerceAgentMode(state.mode || "default");
+    this._bakedMode = this._selectedMode;
+    this._activeMode = this._selectedMode;
+    // Goal: an active goal survives resume (condition carries over).
+    this._goal = state.goal;
     this._createdAt = state.createdAt;
     this._initialModel = state.initialModel;
     this._title = state.title;
@@ -2381,6 +2413,8 @@ export class Session {
         turnCount: this._turnCount,
         compactCount: this._compactCount,
         thinkingLevel: this._thinkingLevel,
+        mode: this._selectedMode === "default" ? undefined : this._selectedMode,
+        goal: this._goal ? { condition: this._goal.condition, createdAt: this._goal.createdAt } : undefined,
         title: this._title,
         summary: this._generateSummary(),
         childSessions: childSessionsMeta,
@@ -2466,6 +2500,8 @@ export class Session {
         skill: (args) => this._execSkill(args),
         send: (args) => this._execSend(args),
         reload: () => this._execReload(),
+        create_goal: (args) => this._execCreateGoal(args),
+        update_goal: (args) => this._execUpdateGoal(args),
         $web_search: (args) => toolBuiltinWebSearchPassthrough(args as Record<string, unknown>),
       },
       overrides: this._toolExecutorOverrides,
@@ -3072,6 +3108,233 @@ export class Session {
     this._promptSectionEstimates = null;
   }
 
+  // ==================================================================
+  // Agent mode (switchable working stance — src/modes/index.ts)
+  // ==================================================================
+
+  /** The mode the user has selected (may not have reached the model yet). */
+  get mode(): AgentMode {
+    return this._selectedMode;
+  }
+
+  /**
+   * Select a working mode. Takes effect lazily: nothing is injected until the
+   * next message is sent (see _settleModeForTurn), so toggling between sends
+   * nets out to nothing. Safe to call at any time, including mid-turn.
+   */
+  setMode(mode: AgentMode): void {
+    this._selectedMode = mode;
+    this.onSaveRequest?.();
+  }
+
+  /**
+   * Settle the selected mode into the conversation at a turn entry point.
+   * Called before the user message (or auto-resume drain) is appended, so the
+   * stance precedes the input it governs.
+   *
+   * - Before the first real user message, re-bake the system prompt instead
+   *   of injecting: whatever mode is selected at first send IS the initial
+   *   stance (no transition ever existed).
+   * - Mid-session, inject a transition notice only when the selection differs
+   *   from what the conversation currently reflects (activeMode).
+   */
+  private _settleModeForTurn(): void {
+    // A→B→A toggles between sends net out to nothing.
+    if (this._selectedMode === this._activeMode) return;
+    if (!this._conversationStarted) {
+      // First message: bake the selection into the system prompt directly.
+      this._bakedMode = this._selectedMode;
+      this._activeMode = this._selectedMode;
+      this._cachedSystemPrompt = this._assembleSystemPrompt();
+      this._promptSectionEstimates = null;
+      return;
+    }
+    // Stance files may use {SESSION_ARTIFACTS}/{PROJECT_ROOT}: the baked path
+    // renders them with the rest of the system prompt, but an injected notice
+    // is ordinary conversation content — render here or the model sees raw
+    // placeholders.
+    const notice = renderPromptVariables(
+      buildModeTransitionNotice(this._selectedMode, this._bakedMode),
+      {
+        projectRoot: this._projectRoot,
+        sessionArtifacts: this._getPredictedArtifactsDirIfAvailable()
+          ?? this._resolveSessionArtifacts({ allowUnresolved: true }),
+        systemData: this._resolveSystemData({ allowUnresolved: true }),
+        shellNotes: buildShellNotes(shell.kind),
+        initialModel: this._initialModel,
+      },
+    );
+    // The user sees a dim status line; the stance itself travels as a
+    // TUI-invisible system message (same display split as sub-agent kill
+    // notices — never a user bubble).
+    this.appendStatusMessage(`Mode switched to ${this._selectedMode}`, "mode_switch");
+    const ctxId = this._allocateContextId();
+    const entry = createUserMessageEntry(
+      this._nextLogId("user_message"),
+      this._turnCount,
+      "[System]",
+      `<system-message>\n${notice}\n</system-message>`,
+      ctxId,
+      { tuiVisible: false, inputKind: "system" },
+    );
+    entry.tuiVisible = false;
+    (entry.meta as Record<string, unknown>)["modeTransition"] = true;
+    this._appendEntry(entry, false);
+    this._activeMode = this._selectedMode;
+  }
+
+  /**
+   * The contextId of the most recent mode-transition notice, when it still
+   * reflects the active stance. Protected from agent-initiated summarization
+   * (the stance must stay in context verbatim); superseded notices are fair
+   * game. Returns null when the stance lives in the system prompt instead.
+   */
+  private _protectedModeTransitionContextId(): string | null {
+    if (this._activeMode === this._bakedMode) return null;
+    for (let i = this._log.length - 1; i >= 0; i--) {
+      const entry = this._log[i];
+      if (entry.discarded) continue;
+      if ((entry.meta as Record<string, unknown>)["modeTransition"]) {
+        const ctxId = (entry.meta as Record<string, unknown>)["contextId"];
+        return typeof ctxId === "string" ? ctxId : null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Consolidate mode state at a compact boundary: the rebuilt context starts
+   * fresh, so bake the current selection into the system prompt and drop the
+   * transition-notice bookkeeping. No-op (and cache-preserving) when the
+   * baked mode is already current.
+   */
+  private _consolidateModeAtCompact(): void {
+    this._activeMode = this._selectedMode;
+    if (this._bakedMode === this._selectedMode) return;
+    this._bakedMode = this._selectedMode;
+    this._cachedSystemPrompt = this._assembleSystemPrompt();
+    this._promptSectionEstimates = null;
+  }
+
+  // ==================================================================
+  // Session goal (/goal — condition-driven turn continuation)
+  // ==================================================================
+
+  /** The active goal, or null. Survives resume; ends via update_goal or /goal clear. */
+  get goal(): { condition: string; createdAt: number } | null {
+    return this._goal ? { ...this._goal } : null;
+  }
+
+  /**
+   * Set (or replace) the session goal. No judge and no budget by design:
+   * the model ends the loop itself via update_goal, honesty is enforced by
+   * the system prompt, and the user can interrupt or /goal clear at any time.
+   * Throws on an empty condition — an empty goal would drive an unbounded
+   * continuation loop with nothing to satisfy (guards the RPC path; the
+   * command and tool paths pre-validate).
+   */
+  setGoal(condition: string): void {
+    const trimmed = condition.trim();
+    if (!trimmed) {
+      throw new Error("Goal condition cannot be empty.");
+    }
+    this._goal = { condition: trimmed, createdAt: Date.now() };
+    this._recordSessionEvent("goal set");
+    this.onSaveRequest?.();
+  }
+
+  /** Clear the active goal (user-initiated; also called by update_goal). */
+  clearGoal(): void {
+    this._goal = null;
+    this.onSaveRequest?.();
+  }
+
+  private _execCreateGoal(args: Record<string, unknown>): ToolResult {
+    const condition = typeof args["condition"] === "string" ? args["condition"].trim() : "";
+    if (!condition) {
+      return new ToolResult({ content: "Error: `condition` must be a non-empty string." });
+    }
+    const replaced = this._goal !== null;
+    this.setGoal(condition);
+    return new ToolResult({
+      content:
+        (replaced ? "Replaced the active goal.\n" : "Goal created.\n") +
+        `Condition: ${condition}\n` +
+        "The session will keep re-activating you after each turn until you mark the goal " +
+        "complete or blocked with update_goal (or the user clears it with /goal).",
+    });
+  }
+
+  private _execUpdateGoal(args: Record<string, unknown>): ToolResult {
+    const status = args["status"];
+    const evidence = typeof args["evidence"] === "string" ? args["evidence"].trim() : "";
+    if (!this._goal) {
+      return new ToolResult({ content: "Error: no active goal to update." });
+    }
+    if (status !== "complete" && status !== "blocked") {
+      return new ToolResult({ content: "Error: `status` must be \"complete\" or \"blocked\"." });
+    }
+    if (!evidence) {
+      return new ToolResult({
+        content:
+          "Error: `evidence` is required — cite the verification you ran (complete) or the " +
+          "blocker and your attempts across 3+ turns (blocked).",
+      });
+    }
+    const condition = this._goal.condition;
+    this._goal = null;
+    this._recordSessionEvent(status === "complete" ? "goal completed" : "goal blocked");
+    this.appendStatusMessage(
+      status === "complete"
+        ? `Goal completed: ${condition}`
+        : `Goal blocked: ${condition}`,
+      "goal_update",
+    );
+    this.onSaveRequest?.();
+    return new ToolResult({
+      content:
+        `Goal marked ${status}. The continuation loop has ended — finish this turn with a ` +
+        "clear report for the user (outcome, evidence, and anything left open).",
+    });
+  }
+
+  /** Whether the activation loop should re-activate instead of ending the turn. */
+  private _shouldContinueGoal(signal: AbortSignal): boolean {
+    return (
+      this._goal !== null &&
+      !signal.aborted &&
+      !this._activeAsk &&
+      this._capabilities.includeGoalTools
+    );
+  }
+
+  /** Append the goal-continuation notice that starts the next activation. */
+  private _appendGoalContinuationEntry(): void {
+    if (!this._goal) return;
+    const notice =
+      `[SYSTEM: Goal continuation — the session goal is still active:\n` +
+      `"${this._goal.condition}"\n` +
+      `The previous turn ended without resolving it. Continue working toward it now. ` +
+      `When the condition verifiably holds, mark it with update_goal(status: "complete", evidence: ...). ` +
+      `If the same blocker has stopped progress for 3+ consecutive turns, mark it blocked instead.]`;
+    // Dim status line for the user; the notice itself is TUI-invisible
+    // (model-only), mirroring the mode-transition display split.
+    this.appendStatusMessage("Goal continues — condition not met yet", "goal_continuation");
+    const ctxId = this._allocateContextId();
+    const entry = createUserMessageEntry(
+      this._nextLogId("user_message"),
+      this._turnCount,
+      "[System]",
+      `<system-message>\n${notice}\n</system-message>`,
+      ctxId,
+      { tuiVisible: false, inputKind: "system" },
+    );
+    entry.tuiVisible = false;
+    (entry.meta as Record<string, unknown>)["goalContinuation"] = true;
+    this._appendEntry(entry, false);
+    this._recordSessionEvent("goal continuation");
+  }
+
   applyGlobalPreferences(preferences: GlobalTuiPreferences): void {
     const prefs = createGlobalTuiPreferences(preferences);
     this._preferredThinkingLevel = prefs.thinkingLevel;
@@ -3113,12 +3376,15 @@ export class Session {
     // ignored (defaults stay); the /summarize_hint command validates on input.
     if (settings.summarize_hint) {
       const hint = settings.summarize_hint;
+      // Only levels the user actually wrote count as explicit configuration —
+      // an enabled-only entry must not disable the mode-default thresholds.
+      const hasLevels = typeof hint.level1 === "number" || typeof hint.level2 === "number";
       const level1 = hint.level1 ?? this._thresholds.context_hint_level1;
       const level2 = hint.level2 ?? this._thresholds.context_hint_level2;
       const levelsValid = validateSummarizeHintLevels(level1, level2) === null;
       this.setSummarizeHintConfig({
         enabled: hint.enabled,
-        ...(levelsValid ? { level1, level2 } : {}),
+        ...(hasLevels && levelsValid ? { level1, level2 } : {}),
       });
     }
 
@@ -3135,7 +3401,7 @@ export class Session {
   }
 
   /** Current two-tier summarize hint configuration. */
-  getSummarizeHintConfig(): { enabled: boolean; level1: number; level2: number } {
+  getSummarizeHintConfig(): { enabled: boolean; level1: number; level2: number; userConfigured: boolean } {
     return this._contextManager.getSummarizeHintConfig();
   }
 
@@ -3217,7 +3483,15 @@ export class Session {
     let estSystemPrompt = 0;
     let estToolDocs = 0;
     if (recipe) {
-      const layers = getPromptLayers(recipe, { guidelineTools: this._guidelineToolNames() });
+      const layers = getPromptLayers(recipe, {
+        guidelineTools: this._guidelineToolNames(),
+        modeSection: this._capabilities.includeSpawnTool
+          ? buildModeSection(this._bakedMode)
+          : undefined,
+        contextGuidance: this._capabilities.includeSummarizeContextTool
+          ? buildContextGuidance(this.primaryAgent.modelConfig.guidance)
+          : undefined,
+      });
       estSystemPrompt = countTokens(layers.roleBody) + countTokens(layers.knowledge);
       estToolDocs = countTokens(layers.toolDocs);
     } else {
@@ -3660,7 +3934,7 @@ export class Session {
       this.onSaveRequest?.();
 
       const prompt = appendManualInstruction(
-        COMPACT_PROMPT_OUTPUT,
+        appendModeCompactNote(COMPACT_PROMPT_OUTPUT, this._activeMode),
         instruction,
         "compact",
       );
@@ -4446,8 +4720,11 @@ export class Session {
         }
 
         // Messages typed while the assistant was producing a final text reply
-        // become the next model input in the same work lifecycle.
+        // become the next model input in the same work lifecycle. Settle any
+        // pending mode switch first so the stance precedes the input it
+        // governs (same contract as the turn entry points).
         if (this._hasInboxMessages()) {
+          this._settleModeForTurn();
           this._drainInboxAsEntries();
           continue;
         }
@@ -4458,6 +4735,20 @@ export class Session {
         // Note: toolHistory.length is cumulative across all rounds in the tool
         // loop, so it can be > 0 even when the last call had no tool_calls.
         if (result.endedWithoutToolCalls) {
+          // Goal continuation: an active goal re-activates instead of ending
+          // the turn (same shape as the queued-message drain above). The
+          // activation budget resets like the post-compact path — the loop's
+          // exits are update_goal, /goal clear, and the user's interrupt.
+          if (this._shouldContinueGoal(activeSignal)) {
+            // A continuation boundary is a settle point: a mode switched
+            // during a long goal run takes effect here, not only at the next
+            // real user message (which an unattended run may never get).
+            this._settleModeForTurn();
+            this._appendGoalContinuationEntry();
+            this.onSaveRequest?.();
+            activationIdx = -1;
+            continue;
+          }
           reachedLimit = false;
           turnEndStatus = "completed";
           break;
@@ -4604,6 +4895,7 @@ export class Session {
       if (!this._hasInboxMessages() && !this._hasUnprocessedUserMessage()) {
         return "";
       }
+      this._settleModeForTurn();
       this._drainInboxAsEntries();
       this.onSaveRequest?.();
     } else {
@@ -4656,6 +4948,11 @@ export class Session {
         }
         userContent = parts;
       }
+
+      // Settle any pending mode switch BEFORE the user message lands, so the
+      // stance precedes the input it governs (pre-first-message this re-bakes
+      // the system prompt instead of injecting).
+      this._settleModeForTurn();
 
       // display = original user input (what they typed); content = expanded for API
       const displayText = userInput;
@@ -5732,6 +6029,7 @@ export class Session {
   }
 
   private _execSummarizeContextTool(args: Record<string, unknown>): ToolResult {
+    const protectedCtx = this._protectedModeTransitionContextId();
     const result = execSummarizeContextOnLog(
       args,
       this._log,
@@ -5740,7 +6038,10 @@ export class Session {
       this._turnCount,
       this._manualSummarizeExactRange
         ? { origin: "manual", exactRange: this._manualSummarizeExactRange }
-        : { origin: "agent" },
+        : {
+            origin: "agent",
+            protectedContextIds: protectedCtx ? new Set([protectedCtx]) : undefined,
+          },
     );
 
     // Defer summary entries — they must appear AFTER the tool_result to avoid
@@ -5950,7 +6251,16 @@ export class Session {
   private _assembleSystemPrompt(): string {
     const recipe = this.primaryAgent.promptRecipe;
     const agentPrompt = recipe
-      ? assembleSystemPrompt(recipe, { guidelineTools: this._guidelineToolNames() })
+      ? assembleSystemPrompt(recipe, {
+          guidelineTools: this._guidelineToolNames(),
+          // Mode stance is a root-session concern; children never see one.
+          modeSection: this._capabilities.includeSpawnTool
+            ? buildModeSection(this._bakedMode)
+            : undefined,
+          contextGuidance: this._capabilities.includeSummarizeContextTool
+            ? buildContextGuidance(this.primaryAgent.modelConfig.guidance)
+            : undefined,
+        })
       : this.primaryAgent.systemPrompt;
 
     return assembleFullSystemPrompt({
@@ -6054,7 +6364,11 @@ export class Session {
     }
 
     // Inject compact prompt as user_message entry (compactPhase, invisible in TUI)
-    const prompt = promptOverride ?? (scenario === "before_turn" ? COMPACT_PROMPT_OUTPUT : COMPACT_PROMPT_TOOLCALL);
+    const prompt = promptOverride ??
+      appendModeCompactNote(
+        scenario === "before_turn" ? COMPACT_PROMPT_OUTPUT : COMPACT_PROMPT_TOOLCALL,
+        this._activeMode,
+      );
     const compactPromptEntry = createUserMessageEntry(
       this._nextLogId("user_message"),
       this._turnCount,
@@ -6195,6 +6509,11 @@ export class Session {
         this._touchLog();
       }
     }
+
+    // Compact is a conversation boundary: consolidate the mode selection into
+    // the system prompt so accumulated transition notices (now archived with
+    // the old window) are no longer load-bearing.
+    this._consolidateModeAtCompact();
 
     // Emit compact_end event
     if (this._progress) {

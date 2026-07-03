@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { BASIC_TOOLS } from "../src/tools/basic.js";
+import { BASH_MAX_TIMEOUT } from "../src/tools/shared.js";
 import {
   SPAWN_TOOL,
   KILL_AGENT_TOOL,
@@ -123,6 +124,14 @@ describe("tool docs", () => {
     expect(buildToolGuidelinesSection([])).toBe("");
     expect(buildToolGuidelinesSection(["mcp__srv__tool"])).toBe("");
   });
+
+  it("bakes implementation constants into the docs (no placeholders, live value)", () => {
+    for (const [name, doc] of Object.entries(TOOL_DOCS)) {
+      expect(doc.brief.includes("{BASH_MAX_TIMEOUT}"), `${name} brief has raw placeholder`).toBe(false);
+      expect(doc.guide.includes("{BASH_MAX_TIMEOUT}"), `${name} guide has raw placeholder`).toBe(false);
+    }
+    expect(TOOL_DOCS["bash"]!.guide).toContain(`max ${BASH_MAX_TIMEOUT}s`);
+  });
 });
 
 describe("skill tool and skills section", () => {
@@ -172,6 +181,8 @@ describe("commToolNamesForCapabilities", () => {
     expect(names).toContain("ask");
     expect(names).toContain("reload");
     expect(names).toContain("skill");
+    expect(names).toContain("create_goal");
+    expect(names).toContain("update_goal");
   });
 
   it("maps child capabilities to await_event only", () => {

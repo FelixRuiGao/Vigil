@@ -66,6 +66,12 @@ export interface OpenTuiScreenProps {
   /** Pre-formatted usage line (e.g. "5h: 90% left | wk: 80% left" or "month: 300/300 left"); null to hide. */
   usageText?: string | null;
   permissionMode?: string;
+  /** Agent mode for the input area tint + label ("default" = no tint). */
+  agentMode?: string;
+  onModeClick?: () => void;
+  /** Active goal creation timestamp for the goal indicator; null = none. */
+  goalCreatedAt?: number | null;
+  onGoalClick?: () => void;
   presentationEntries: readonly PresentationEntry[];
   processing: boolean;
   markdownMode: "rendered" | "raw";
@@ -184,6 +190,10 @@ export function OpenTuiScreen({
   cacheReadTokens,
   usageText,
   permissionMode,
+  agentMode,
+  onModeClick,
+  goalCreatedAt,
+  onGoalClick,
   presentationEntries,
   processing,
   markdownMode,
@@ -329,6 +339,10 @@ export function OpenTuiScreen({
       elapsed={turnElapsed}
       cwd={shortenPath(process.cwd())}
       permissionMode={permissionMode}
+      agentMode={agentMode}
+      onModeClick={onModeClick}
+      goalCreatedAt={goalCreatedAt}
+      onGoalClick={onGoalClick}
       hint={hint}
       contextTokens={contextTokens}
       contextLimit={contextLimit}

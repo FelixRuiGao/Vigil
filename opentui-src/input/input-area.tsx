@@ -21,6 +21,24 @@ import {
   ASKING_SPINNER_INTERVAL,
 } from "../presentation/use-spinner.js";
 
+/**
+ * Text color per agent mode; also tints the input border. `default` is
+ * deliberately absent — default mode renders exactly as before (dim border,
+ * no mode label), keeping the common case zero-noise.
+ */
+const MODE_COLORS: Record<string, string> = {
+  vibe: "#56B6C2",
+  scale: "#b4a0ec",
+  auto: "#D19A66",
+};
+
+function formatGoalElapsedShort(createdAt: number): string {
+  const totalMin = Math.max(0, Math.floor((Date.now() - createdAt) / 60_000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${m.toString().padStart(2, "0")}m` : `${m}m`;
+}
+
 interface InputAreaProps {
   inputRef: React.RefObject<FermiComposerRenderable | null>;
   processing: boolean;
@@ -35,6 +53,14 @@ interface InputAreaProps {
   elapsed: number;
   cwd: string;
   permissionMode?: string;
+  /** Agent mode; "default" renders nothing (zero-noise). */
+  agentMode?: string;
+  /** Open the /mode picker. */
+  onModeClick?: () => void;
+  /** Active goal creation timestamp; null/undefined = no goal indicator. */
+  goalCreatedAt?: number | null;
+  /** Open the /goal picker. */
+  onGoalClick?: () => void;
   hint: string | null;
   contextTokens: number;
   contextLimit: number | undefined;
@@ -122,6 +148,10 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
     elapsed,
     cwd,
     permissionMode,
+    agentMode,
+    onModeClick,
+    goalCreatedAt,
+    onGoalClick,
     hint,
     contextTokens,
     contextLimit,
@@ -169,6 +199,10 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
   const contextText = contextLimit
     ? `${formatCompactTokensShort(contextTokens)}/${formatCompactTokensShort(contextLimit)}${cacheLabel}`
     : `${formatCompactTokensShort(contextTokens)}${cacheLabel}`;
+
+  // Mode tint: non-default modes color the border and show a text label in
+  // the bottom row. Default mode renders exactly as before.
+  const modeColor = agentMode ? MODE_COLORS[agentMode] : undefined;
 
   return (
     <box flexDirection="column" gap={0} flexShrink={0}>
@@ -266,7 +300,7 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
         flexShrink={0}
         border={true}
         borderStyle="rounded"
-        borderColor={colors.dim}
+        borderColor={modeColor ?? colors.dim}
         paddingRight={1}
       >
         <text fg="#d4d4d4" attributes={ATTRS_BOLD} content="❯ " flexShrink={0} />
@@ -311,6 +345,24 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
               />
             )}
           </box>
+          {!hint && modeColor && agentMode ? (
+            <box
+              flexShrink={0}
+              cursor="pointer"
+              onMouseDown={(e: any) => { e.stopPropagation(); e.preventDefault(); onModeClick?.(); }}
+            >
+              <text fg={modeColor} content={` · ${agentMode}`} />
+            </box>
+          ) : null}
+          {!hint && goalCreatedAt ? (
+            <box
+              flexShrink={0}
+              cursor="pointer"
+              onMouseDown={(e: any) => { e.stopPropagation(); e.preventDefault(); onGoalClick?.(); }}
+            >
+              <text fg={colors.dim} content={` · goal ${formatGoalElapsedShort(goalCreatedAt)}`} />
+            </box>
+          ) : null}
           <box flexGrow={1} />
           {usageText && shouldShowUsage(contentWidth, 11, usageText.length, contextText.length) ? (
             <text fg={colors.dim} content={`  ${usageText}`} flexShrink={0} />

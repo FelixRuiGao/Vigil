@@ -71,3 +71,24 @@ export function appendManualInstruction(
   if (!trimmed) return basePrompt;
   return `${basePrompt}\n\nAdditional user instruction for this manual ${kind} request:\n${trimmed}`;
 }
+
+/**
+ * Mode-flavored addition to the compact prompt. In scale/auto modes durable
+ * state lives in files by design (design doc, plan, ledger, git), so the
+ * continuation prompt should point at them instead of duplicating their
+ * contents — compact is a planned, cheap event there, not an emergency.
+ * Appended identically to both scenarios, preserving the sync invariant.
+ */
+export function appendModeCompactNote(basePrompt: string, mode: string): string {
+  if (mode !== "scale" && mode !== "auto") return basePrompt;
+  const files = mode === "auto"
+    ? "the plan file, the ledger, and the git log"
+    : "the design document, the plan file, and the git log";
+  return (
+    `${basePrompt}\n\n` +
+    `This session's durable state lives on disk: ${files}. Do not duplicate their contents ` +
+    `into the continuation prompt — reference them by path and state what they don't record: ` +
+    `the in-flight step, unwritten conclusions, and anything decided but not yet filed. ` +
+    `Instruct the new instance to read those files first upon resuming.`
+  );
+}

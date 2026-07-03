@@ -13,7 +13,7 @@ function makeSessionStub(): {
   setCalls: Array<Record<string, unknown>>;
 } {
   const setCalls: Array<Record<string, unknown>> = [];
-  const state = { enabled: true, level1: 50, level2: 75 };
+  const state = { enabled: true, level1: 50, level2: 75, userConfigured: false };
   const session = {
     getSummarizeHintConfig: () => ({ ...state }),
     setSummarizeHintConfig: (config: { enabled?: boolean; level1?: number; level2?: number }) => {
@@ -21,6 +21,7 @@ function makeSessionStub(): {
       if (config.enabled !== undefined) state.enabled = config.enabled;
       if (config.level1 !== undefined) state.level1 = config.level1;
       if (config.level2 !== undefined) state.level2 = config.level2;
+      if (config.level1 !== undefined || config.level2 !== undefined) state.userConfigured = true;
     },
   };
   return { session, setCalls };
@@ -77,8 +78,29 @@ describe("/summarize_hint command", () => {
       await cmd!.handler(ctx, "off");
 
       expect(setCalls).toEqual([{ enabled: false }]);
+      // A plain toggle persists ONLY the switch: writing levels here would
+      // turn them into "explicit user configuration" on the next startup and
+      // permanently disable the scale/auto mode-default thresholds.
       const settings = JSON.parse(readFileSync(join(homeDir, "settings.json"), "utf-8"));
-      expect(settings.summarize_hint).toEqual({ enabled: false, level1: 50, level2: 75 });
+      expect(settings.summarize_hint).toEqual({ enabled: false });
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("a toggle after explicit levels keeps persisting those levels", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "fermi-shint-"));
+    try {
+      const registry = buildDefaultRegistry();
+      const cmd = registry.lookup("/summarize_hint");
+      const { session } = makeSessionStub();
+      const { ctx } = makeContext(registry, session, homeDir);
+
+      await cmd!.handler(ctx, "40 70");
+      await cmd!.handler(ctx, "off");
+
+      const settings = JSON.parse(readFileSync(join(homeDir, "settings.json"), "utf-8"));
+      expect(settings.summarize_hint).toEqual({ enabled: false, level1: 40, level2: 70 });
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }

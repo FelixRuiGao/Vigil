@@ -25,6 +25,8 @@ import {
   type SealedSchema,
   type ThinkingEncryption,
   type TransportProtocol,
+  isAnthropicFamilyModel,
+  isOpenAIFamilyModel,
   resolveSealedSchema,
   resolveThinkingEncryption,
   resolveTransportProtocol,
@@ -59,7 +61,28 @@ export interface ModelConfig {
    * provider does not emit or accept sealed payloads.
    */
   sealedSchema: SealedSchema | null;
+  /**
+   * Prompt-pedagogy tier. "standard" models get principle-level guidance;
+   * "detailed" models get explicit recipes and checklists (context management
+   * especially). Defaults by family heuristic (Claude and GPT families →
+   * standard, everything else → detailed); overridable per model config via
+   * the `guidance` field.
+   */
+  guidance: GuidanceTier;
   extra: Record<string, unknown>;
+}
+
+export type GuidanceTier = "standard" | "detailed";
+
+/**
+ * Default guidance tier by model family: frontier Claude/GPT models follow
+ * principle-level prompts well; everything else gets the explicit-recipe
+ * tier. Same family heuristic as the open-model prompt overlay.
+ */
+export function resolveGuidanceTier(modelName: string): GuidanceTier {
+  return isAnthropicFamilyModel(modelName) || isOpenAIFamilyModel(modelName)
+    ? "standard"
+    : "detailed";
 }
 
 export interface ModelConfigEntry {
@@ -714,6 +737,9 @@ export class Config {
       sealedSchemaOverride !== undefined
         ? (sealedSchemaOverride === "" ? null : sealedSchemaOverride)
         : resolveSealedSchema(provider, modelName);
+    const guidance =
+      optionalConfigEnumField(name, cfg, "guidance", ["standard", "detailed"] as const) ??
+      resolveGuidanceTier(modelName);
 
     return {
       name,
@@ -741,6 +767,7 @@ export class Config {
       transportProtocol,
       thinkingEncryption,
       sealedSchema,
+      guidance,
       extra,
     };
   }

@@ -15,6 +15,7 @@ import type { ChildSessionSnapshot } from "../src/session-tree-types.js";
 import { saveGlobalSettingsPatch, saveLog } from "../src/persistence.js";
 import { projectQueuedInputs } from "../src/log-projection.js";
 import { isCommandExitSignal } from "../src/commands.js";
+import { coerceAgentMode, nextAgentMode } from "../src/modes/index.js";
 import { ProgressReporter, type ProgressEvent } from "../src/progress.js";
 import { scanCandidates } from "../src/file-attach.js";
 import { readClipboardImage } from "../src/clipboard-image.js";
@@ -514,6 +515,8 @@ export function OpenTuiApp({
   const [statData, setStatData] = useState<import("./display/overlays/stat-panel.js").StatData | null>(null);
   const [markdownMode, setMarkdownMode] = useState<"rendered" | "raw">("rendered");
   const [permissionModeState, setPermissionModeState] = useState<string>(session.permissionMode ?? "reversible");
+  const [agentModeState, setAgentModeState] = useState<string>(session.mode ?? "default");
+  const [goalCreatedAt, setGoalCreatedAt] = useState<number | null>(session.goal?.createdAt ?? null);
   const [pendingAsk, setPendingAsk] = useState<PendingAskUi | null>(
     typeof session.getPendingAsk === "function" ? session.getPendingAsk() : null,
   );
@@ -898,6 +901,8 @@ export function OpenTuiApp({
       // appear in snapshots. No need for frozenChildView protection here.
       setPendingAsk(session.getPendingAsk?.() ?? null);
       setPermissionModeState(session.permissionMode ?? "reversible");
+      setAgentModeState(session.mode ?? "default");
+      setGoalCreatedAt(session.goal?.createdAt ?? null);
       setRootLogRevision(session.getLogRevision?.() ?? 0);
       updateContextTokenState(session.lastTotalTokens, session.lastCacheReadTokens ?? 0);
     };
@@ -3073,6 +3078,27 @@ export function OpenTuiApp({
       }
     }
 
+    // Tab / Shift+Tab: cycle agent mode (default → vibe → scale → auto).
+    // Guarded against every overlay explicitly — some overlay blocks above
+    // fall through for Tab variants they don't handle (e.g. Shift+Tab in the
+    // command picker), and those must not leak into a mode switch. Selection
+    // is immediate in the UI; the prompt-side switch settles at the next send.
+    if (
+      event.name === "tab" &&
+      activeTabId === "main" &&
+      !commandPicker && !checkboxPicker && !commandOverlay.visible &&
+      !promptSelect && !promptSecret && !pendingAsk &&
+      typeof session.setMode === "function"
+    ) {
+      const next = nextAgentMode(coerceAgentMode(agentModeState), event.shift ? -1 : 1);
+      session.setMode(next);
+      setAgentModeState(next);
+      showHint(next === "default" ? "Mode: default" : `Mode: ${next} — takes effect with the next message`);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     if (!composer || pendingAsk) return;
 
     if (isDeleteToVisualLineStartShortcut(event)) {
@@ -3307,6 +3333,10 @@ export function OpenTuiApp({
       cacheReadTokens={effectiveCacheReadTokens}
       usageText={usageText}
       permissionMode={permissionModeState}
+      agentMode={agentModeState}
+      onModeClick={() => { void handleSubmit("/mode"); }}
+      goalCreatedAt={goalCreatedAt}
+      onGoalClick={() => { void handleSubmit("/goal"); }}
       presentationEntries={effectiveEntries}
       processing={effectiveProcessing}
       markdownMode={markdownMode}

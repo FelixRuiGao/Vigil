@@ -146,6 +146,18 @@ export interface AssembleSystemPromptOptions {
    * documentation travels in their own schemas.
    */
   guidelineTools?: string[];
+  /**
+   * The "# Mode" stance section (main agent only), inserted right after the
+   * role body so it frames everything that follows. Built by Session from
+   * the baked mode (src/modes/); sub-agents never pass it.
+   */
+  modeSection?: string;
+  /**
+   * Extra context-management pedagogy appended after the template policy
+   * file. Keyed on the model's guidance tier (detailed models get explicit
+   * recipes); rebuilt on model switch alongside the rest of the prompt.
+   */
+  contextGuidance?: string;
 }
 
 /**
@@ -157,7 +169,10 @@ export function getPromptLayers(
   opts?: AssembleSystemPromptOptions,
 ): PromptLayers {
   const { templateDir, spec } = recipe;
-  const roleBody = resolveSystemPrompt(spec, templateDir);
+  let roleBody = resolveSystemPrompt(spec, templateDir);
+  if (opts?.modeSection) {
+    roleBody = roleBody.trimEnd() + "\n\n" + opts.modeSection;
+  }
 
   const parts: string[] = [];
   const guidelines = buildToolGuidelinesSection(
@@ -173,6 +188,7 @@ export function getPromptLayers(
       if (policy) parts.push(policy);
     }
   }
+  if (opts?.contextGuidance) parts.push(opts.contextGuidance);
   const toolDocs = parts.join("\n\n");
 
   let knowledge = "";
@@ -203,7 +219,12 @@ export function assembleSystemPrompt(
   // --- 1. Role body (core system prompt) ---
   let systemPrompt = resolveSystemPrompt(spec, templateDir);
 
-  // --- 2. Generated Tool Guidelines (single-sourced per-tool guides) ---
+  // --- 2. Mode stance (main agent only — Session passes the baked mode) ---
+  if (opts?.modeSection) {
+    systemPrompt = systemPrompt.trimEnd() + "\n\n" + opts.modeSection;
+  }
+
+  // --- 3. Generated Tool Guidelines (single-sourced per-tool guides) ---
   const guidelines = buildToolGuidelinesSection(
     opts?.guidelineTools ?? resolveToolNames(spec),
   );
@@ -211,7 +232,7 @@ export function assembleSystemPrompt(
     systemPrompt = systemPrompt.trimEnd() + "\n\n" + guidelines;
   }
 
-  // --- 3. Template policy file (hand-written, template-specific) ---
+  // --- 4. Template policy file (hand-written, template-specific) ---
   const toolsPromptFile = spec["tools_prompt_file"] as string | undefined;
   if (toolsPromptFile) {
     const toolsPath = join(templateDir, toolsPromptFile);
@@ -223,7 +244,12 @@ export function assembleSystemPrompt(
     }
   }
 
-  // --- 4. Knowledge files (optional directory) ---
+  // --- 5. Context-management pedagogy (guidance-tier keyed, Session-passed) ---
+  if (opts?.contextGuidance) {
+    systemPrompt = systemPrompt.trimEnd() + "\n\n" + opts.contextGuidance;
+  }
+
+  // --- 6. Knowledge files (optional directory) ---
   const knowledgeDir = join(templateDir, "knowledge");
   if (existsSync(knowledgeDir) && statSync(knowledgeDir).isDirectory()) {
     const knowledgeParts: string[] = [];

@@ -47,6 +47,6 @@ Some filesystem operations have no dedicated tool; these are fine via bash:
 
 ### Other notes
 
-- **Timeout (required, max 600s):** the synchronous wait budget, not a kill switch. A command still running when the timeout elapses is **not killed** — it moves to a tracked background shell and keeps running; the result includes the output so far and the shell id. Poll with `bash_output`, wait with `await_event`, or `kill_shell` it. Never re-run a command just because it timed out — its side effects are still in progress. If the partial output suggests it was stuck or waiting for input, remember to `kill_shell` it.
+- **Timeout (required, max {BASH_MAX_TIMEOUT}s):** the synchronous wait budget, not a kill switch. A command still running when the timeout elapses is **not killed** — it moves to a tracked background shell and keeps running; the result includes the output so far and the shell id. Poll with `bash_output`, wait with `await_event`, or `kill_shell` it. Never re-run a command just because it timed out — its side effects are still in progress. If the partial output suggests it was stuck or waiting for input, remember to `kill_shell` it.
 - **Output limit:** ~200KB per stream. When a stream exceeds the cap the head and tail are kept and the middle is dropped; the **full untruncated output is also written to a temp file** and the path is included in the result, so you can `read_file` or `grep` the complete log if needed.
 - **Working directory:** Use the `cwd` parameter for one-off directory changes rather than changing directories inside the command.

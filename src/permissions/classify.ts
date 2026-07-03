@@ -53,6 +53,8 @@ const READ_TOOLS = new Set([
   "ask", "check_status", "await_event", "send",
   "bash_output", "skill", "reload", "time",
   "kill_shell",
+  // Pure session-state transitions — no filesystem or external effect.
+  "create_goal", "update_goal",
 ]);
 
 const WRITE_REVERSIBLE_TOOLS = new Set([

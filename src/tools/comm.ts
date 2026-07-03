@@ -202,6 +202,47 @@ export const SEND_TOOL: ToolDef = {
   tuiPolicy: { partialReveal: { completeArgs: ["to"] } },
 };
 
+export const CREATE_GOAL_TOOL: ToolDef = {
+  name: "create_goal",
+  description: toolBrief("create_goal"),
+  parameters: {
+    type: "object",
+    properties: {
+      condition: {
+        type: "string",
+        description:
+          "The completion condition — one measurable end state plus the check that proves it " +
+          "(e.g. \"all tests in tests/ pass: `bun test` exits 0\").",
+      },
+    },
+    required: ["condition"],
+  },
+  summaryTemplate: "{agent} is creating a goal",
+};
+
+export const UPDATE_GOAL_TOOL: ToolDef = {
+  name: "update_goal",
+  description: toolBrief("update_goal"),
+  parameters: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["complete", "blocked"],
+        description: "Terminal status for the active goal.",
+      },
+      evidence: {
+        type: "string",
+        description:
+          "For `complete`: the verification you ran and its result. For `blocked`: the blocker, " +
+          "what you tried across the last 3+ turns, and what you would try next if it were lifted.",
+      },
+    },
+    required: ["status", "evidence"],
+  },
+  summaryTemplate: "{agent} is updating the goal",
+};
+
 export const RELOAD_TOOL: ToolDef = {
   name: "reload",
   description: toolBrief("reload"),

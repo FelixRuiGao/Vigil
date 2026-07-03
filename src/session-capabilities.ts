@@ -8,6 +8,8 @@ export interface SessionCapabilities {
   includeAskTool: boolean;
   includeSkillTools: boolean;
   includeReloadTool: boolean;
+  /** create_goal / update_goal — goal-driven turn continuation (root only). */
+  includeGoalTools: boolean;
 }
 
 export const ROOT_SESSION_CAPABILITIES: SessionCapabilities = {
@@ -20,6 +22,7 @@ export const ROOT_SESSION_CAPABILITIES: SessionCapabilities = {
   includeAskTool: true,
   includeSkillTools: true,
   includeReloadTool: true,
+  includeGoalTools: true,
 };
 
 export const CHILD_SESSION_CAPABILITIES: SessionCapabilities = {
@@ -32,4 +35,5 @@ export const CHILD_SESSION_CAPABILITIES: SessionCapabilities = {
   includeAskTool: false,
   includeSkillTools: false,
   includeReloadTool: false,
+  includeGoalTools: false,
 };

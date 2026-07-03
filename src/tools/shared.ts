@@ -42,6 +42,13 @@ export const EXCLUDE_DIRS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Hard cap on the bash tool's synchronous wait budget, in seconds.
+ * Lives here (not in basic.ts) so tool-docs.ts can bake the value into the
+ * bash doc without importing basic.ts (which imports tool-docs back).
+ */
+export const BASH_MAX_TIMEOUT = 600; // 10 minutes
+
+/**
  * Hidden entries (dot-prefixed) are skipped universally during walks —
  * applies to both files and directories. Most tools want this default.
  */

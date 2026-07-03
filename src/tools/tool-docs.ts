@@ -13,6 +13,10 @@
  * etc. — the generated section is part of the system prompt and goes through
  * normal variable rendering.
  *
+ * Implementation constants ({BASH_MAX_TIMEOUT}) are a separate, earlier
+ * layer: loadDoc bakes them in at module init, in briefs and guides alike,
+ * so docs can quote limits without copying numbers out of the code.
+ *
  * The files are embedded at build time via Bun text imports, so they ship
  * inside the compiled binary and cannot drift from the code they sit next to.
  */
@@ -23,6 +27,7 @@ import bashDoc from "./docs/bash.md" with { type: "text" };
 import bashBackgroundDoc from "./docs/bash_background.md" with { type: "text" };
 import bashOutputDoc from "./docs/bash_output.md" with { type: "text" };
 import checkStatusDoc from "./docs/check_status.md" with { type: "text" };
+import createGoalDoc from "./docs/create_goal.md" with { type: "text" };
 import editFileDoc from "./docs/edit_file.md" with { type: "text" };
 import globDoc from "./docs/glob.md" with { type: "text" };
 import grepDoc from "./docs/grep.md" with { type: "text" };
@@ -37,9 +42,12 @@ import skillDoc from "./docs/skill.md" with { type: "text" };
 import spawnDoc from "./docs/spawn.md" with { type: "text" };
 import summarizeContextDoc from "./docs/summarize_context.md" with { type: "text" };
 import timeDoc from "./docs/time.md" with { type: "text" };
+import updateGoalDoc from "./docs/update_goal.md" with { type: "text" };
 import webFetchDoc from "./docs/web_fetch.md" with { type: "text" };
 import webSearchDoc from "./docs/web_search.md" with { type: "text" };
 import writeFileDoc from "./docs/write_file.md" with { type: "text" };
+
+import { BASH_MAX_TIMEOUT } from "./shared.js";
 
 export interface ToolDoc {
   /** Short contract for ToolDef.description. Never empty. */
@@ -50,6 +58,13 @@ export interface ToolDoc {
 
 const BRIEF_MARKER = "<!-- brief -->";
 const GUIDE_MARKER = "<!-- guide -->";
+
+/** Bake implementation constants into a doc, then split it. */
+function loadDoc(raw: string): ToolDoc {
+  return parseToolDoc(
+    raw.replaceAll("{BASH_MAX_TIMEOUT}", String(BASH_MAX_TIMEOUT)),
+  );
+}
 
 /** Split a doc file into its brief and guide segments. */
 export function parseToolDoc(raw: string): ToolDoc {
@@ -64,29 +79,31 @@ export function parseToolDoc(raw: string): ToolDoc {
 }
 
 export const TOOL_DOCS: Record<string, ToolDoc> = {
-  read_file: parseToolDoc(readFileDoc),
-  write_file: parseToolDoc(writeFileDoc),
-  edit_file: parseToolDoc(editFileDoc),
-  list_dir: parseToolDoc(listDirDoc),
-  glob: parseToolDoc(globDoc),
-  grep: parseToolDoc(grepDoc),
-  bash: parseToolDoc(bashDoc),
-  bash_background: parseToolDoc(bashBackgroundDoc),
-  bash_output: parseToolDoc(bashOutputDoc),
-  kill_shell: parseToolDoc(killShellDoc),
-  time: parseToolDoc(timeDoc),
-  web_search: parseToolDoc(webSearchDoc),
-  web_fetch: parseToolDoc(webFetchDoc),
-  spawn: parseToolDoc(spawnDoc),
-  send: parseToolDoc(sendDoc),
-  await_event: parseToolDoc(awaitEventDoc),
-  kill_agent: parseToolDoc(killAgentDoc),
-  check_status: parseToolDoc(checkStatusDoc),
-  show_context: parseToolDoc(showContextDoc),
-  summarize_context: parseToolDoc(summarizeContextDoc),
-  ask: parseToolDoc(askDoc),
-  skill: parseToolDoc(skillDoc),
-  reload: parseToolDoc(reloadDoc),
+  read_file: loadDoc(readFileDoc),
+  write_file: loadDoc(writeFileDoc),
+  edit_file: loadDoc(editFileDoc),
+  list_dir: loadDoc(listDirDoc),
+  glob: loadDoc(globDoc),
+  grep: loadDoc(grepDoc),
+  bash: loadDoc(bashDoc),
+  bash_background: loadDoc(bashBackgroundDoc),
+  bash_output: loadDoc(bashOutputDoc),
+  kill_shell: loadDoc(killShellDoc),
+  time: loadDoc(timeDoc),
+  web_search: loadDoc(webSearchDoc),
+  web_fetch: loadDoc(webFetchDoc),
+  spawn: loadDoc(spawnDoc),
+  send: loadDoc(sendDoc),
+  await_event: loadDoc(awaitEventDoc),
+  kill_agent: loadDoc(killAgentDoc),
+  check_status: loadDoc(checkStatusDoc),
+  show_context: loadDoc(showContextDoc),
+  summarize_context: loadDoc(summarizeContextDoc),
+  ask: loadDoc(askDoc),
+  skill: loadDoc(skillDoc),
+  reload: loadDoc(reloadDoc),
+  create_goal: loadDoc(createGoalDoc),
+  update_goal: loadDoc(updateGoalDoc),
 };
 
 /**
@@ -131,6 +148,8 @@ export const TOOL_GUIDELINE_ORDER: string[] = [
   "ask",
   "skill",
   "reload",
+  "create_goal",
+  "update_goal",
 ];
 
 /**

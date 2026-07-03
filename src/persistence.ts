@@ -531,9 +531,19 @@ export interface LogSessionMeta {
   turnCount: number;
   compactCount: number;
   thinkingLevel: string;
+  /** Agent mode selection; omitted when "default". */
+  mode?: string;
+  /** Active goal (condition-driven continuation); omitted when none. */
+  goal?: PersistedGoalState;
   childSessions?: ChildSessionMetaRecord[];
   /** Root session's frozen inbox (persisted on close for snapshot/restore). */
   inbox?: import("./session-tree-types.js").MessageEnvelope[];
+}
+
+/** Persisted /goal state — an active goal survives session close and resume. */
+export interface PersistedGoalState {
+  condition: string;
+  createdAt: number;
 }
 
 /** Local inference server config (oMLX, LM Studio, etc.) */

@@ -18,6 +18,7 @@ import type { SessionStore, LocalProviderConfig, ModelSelectionState, FermiSetti
 import { fetchModelSpecSuggestion } from "./models-dev-lookup.js";
 import { randomSessionId, saveModelSelectionState, saveGlobalSettingsPatch, loadGlobalSettings } from "./persistence.js";
 import { validateSummarizeHintLevels } from "./settings.js";
+import { AGENT_MODES, MODE_DESCRIPTIONS, isAgentMode, type AgentMode } from "./modes/index.js";
 import { VERSION } from "./version.js";
 import { applySessionRestore, findSessionById } from "./session-resume.js";
 import { setDotenvKey } from "./dotenv.js";
@@ -466,8 +467,14 @@ async function cmdSummarizeHint(ctx: CommandContext, args: string): Promise<void
   const applyEnabled = (enabled: boolean): void => {
     const current = session.getSummarizeHintConfig();
     session.setSummarizeHintConfig({ enabled });
+    // Persist levels only when the user set them explicitly — writing the
+    // defaults here would turn a plain toggle into "explicit configuration"
+    // and permanently disable the mode-default thresholds (scale/auto 40/65).
     persistSettingsPatch({
-      summarize_hint: { enabled, level1: current.level1, level2: current.level2 },
+      summarize_hint: {
+        enabled,
+        ...(current.userConfigured ? { level1: current.level1, level2: current.level2 } : {}),
+      },
     }, ctx.fermiHomeDir);
     hint(`Summarize hints: ${enabled ? "ON" : "OFF"}`);
   };
@@ -529,6 +536,157 @@ async function cmdSummarizeHint(ctx: CommandContext, args: string): Promise<void
   ctx.showMessage(
     `Summarize hints: ${current.enabled ? "on" : "off"} · level1 ${current.level1}% · level2 ${current.level2}%\n${SUMMARIZE_HINT_USAGE}`,
   );
+}
+
+// ------------------------------------------------------------------
+// /mode — switch agent mode
+// ------------------------------------------------------------------
+
+function modeOptions(ctx: CommandOptionsContext): CommandOption[] {
+  const current = typeof ctx.session?.mode === "string" ? (ctx.session.mode as string) : "default";
+  return AGENT_MODES.map((m) => ({
+    label: m === current ? `${m} (current)` : m,
+    value: m,
+    detail: MODE_DESCRIPTIONS[m],
+  }));
+}
+
+async function cmdMode(ctx: CommandContext, args: string): Promise<void> {
+  const session = ctx.session;
+  const hint = ctx.showHint ?? ctx.showMessage;
+  if (typeof session.setMode !== "function") {
+    ctx.showMessage("/mode is not available in this session.");
+    return;
+  }
+
+  const apply = (mode: AgentMode): void => {
+    if (session.mode === mode) {
+      hint(`Mode: ${mode} (unchanged)`);
+      return;
+    }
+    session.setMode(mode);
+    hint(`Mode: ${mode} — takes effect with the next message`);
+  };
+
+  const input = args.trim().toLowerCase();
+  if (!input && ctx.promptCommandPicker) {
+    const picked = await ctx.promptCommandPicker(
+      modeOptions({ session: ctx.session, store: ctx.store }),
+      { title: "Agent Mode" },
+    );
+    if (!picked) return;
+    if (isAgentMode(picked.value)) apply(picked.value);
+    return;
+  }
+  if (isAgentMode(input)) {
+    apply(input);
+    return;
+  }
+  ctx.showMessage(`Usage: /mode [${AGENT_MODES.join(" | ")}] — or run /mode for the picker. Tab cycles modes.`);
+}
+
+// ------------------------------------------------------------------
+// /goal — condition-driven turn continuation
+// ------------------------------------------------------------------
+
+const GOAL_CLEAR_ALIASES = new Set(["clear", "stop", "off", "reset", "none", "cancel"]);
+const GOAL_INPUT_LABEL = "Completion condition:";
+const GOAL_INPUT_PLACEHOLDER = "one measurable end state + its check, e.g. `bun test` exits 0";
+
+function formatGoalElapsed(createdAt: number): string {
+  const totalMin = Math.max(0, Math.floor((Date.now() - createdAt) / 60_000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${m.toString().padStart(2, "0")}m` : `${m}m`;
+}
+
+function goalOptions(ctx: CommandOptionsContext): CommandOption[] {
+  const goal = (ctx.session?.goal ?? null) as { condition: string; createdAt: number } | null;
+  if (!goal) {
+    return [{
+      label: "Set a goal…",
+      value: "set",
+      customInput: true,
+      inputLabel: GOAL_INPUT_LABEL,
+      inputPlaceholder: GOAL_INPUT_PLACEHOLDER,
+    }];
+  }
+  const shortCondition = goal.condition.length > 64 ? goal.condition.slice(0, 61) + "…" : goal.condition;
+  return [
+    { label: `Active: ${shortCondition}`, value: "status", detail: formatGoalElapsed(goal.createdAt) },
+    { label: "Clear goal", value: "clear" },
+    {
+      label: "Replace goal…",
+      value: "set",
+      customInput: true,
+      inputLabel: GOAL_INPUT_LABEL,
+      inputPlaceholder: GOAL_INPUT_PLACEHOLDER,
+    },
+  ];
+}
+
+async function cmdGoal(ctx: CommandContext, args: string): Promise<void> {
+  const session = ctx.session;
+  const hint = ctx.showHint ?? ctx.showMessage;
+  if (typeof session.setGoal !== "function") {
+    ctx.showMessage("/goal is not available in this session.");
+    return;
+  }
+
+  const showStatus = (): void => {
+    const goal = session.goal as { condition: string; createdAt: number } | null;
+    ctx.showMessage(
+      goal
+        ? `Goal active (${formatGoalElapsed(goal.createdAt)}):\n${goal.condition}`
+        : "No active goal. Set one with /goal <condition>.",
+    );
+  };
+
+  const setGoal = (condition: string): void => {
+    const trimmed = condition.trim();
+    if (!trimmed) {
+      ctx.showMessage("Goal condition cannot be empty.");
+      return;
+    }
+    session.setGoal(trimmed);
+    // Soft, one-time heads-up: unattended runs stall at approval prompts.
+    // Orthogonal by design — we only remind, never change the permission mode.
+    const permissionNote = session.permissionMode !== "yolo"
+      ? "\nHeads-up: in the current permission mode, actions needing approval will pause the run until you respond."
+      : "";
+    ctx.showMessage(`Goal set:\n${trimmed}${permissionNote}`);
+    ctx.onTurnRequested?.(
+      `A session goal is now active — keep working across turns until it is met:\n${trimmed}\nBegin now.`,
+    );
+  };
+
+  const input = args.trim();
+  if (!input && ctx.promptCommandPicker) {
+    const picked = await ctx.promptCommandPicker(
+      goalOptions({ session: ctx.session, store: ctx.store }),
+      { title: "Session Goal" },
+    );
+    if (!picked) return;
+    if (picked.value === "status") {
+      showStatus();
+    } else if (picked.value === "clear") {
+      session.clearGoal?.();
+      hint("Goal cleared.");
+    } else if (picked.value === "set") {
+      setGoal(picked.note ?? "");
+    }
+    return;
+  }
+  if (!input) {
+    showStatus();
+    return;
+  }
+  if (GOAL_CLEAR_ALIASES.has(input.toLowerCase())) {
+    session.clearGoal?.();
+    hint("Goal cleared.");
+    return;
+  }
+  setGoal(input);
 }
 
 async function cmdResume(ctx: CommandContext, args: string): Promise<void> {
@@ -2361,6 +2519,8 @@ export function buildDefaultRegistry(): CommandRegistry {
   registry.register({ name: "/autoupdate", description: "Toggle automatic update checks", handler: cmdAutoUpdate });
   registry.register({ name: "/autocopy", description: "Toggle copy-on-select (auto-copy a text selection)", handler: cmdAutoCopy });
   registry.register({ name: "/review", description: "Review code changes", handler: cmdReview });
+  registry.register({ name: "/mode", description: "Switch agent mode (default / vibe / scale / auto)", handler: cmdMode, options: modeOptions, pickerTitle: "Agent Mode" });
+  registry.register({ name: "/goal", description: "Set a completion condition the session keeps working toward", handler: cmdGoal, options: goalOptions, pickerTitle: "Session Goal" });
   return registry;
 }
 

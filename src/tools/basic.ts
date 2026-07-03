@@ -37,6 +37,7 @@ import {
 import { classifyFile, IMAGE_MEDIA_TYPES } from "../file-attach.js";
 import { createPatch } from "diff";
 import {
+  BASH_MAX_TIMEOUT,
   isExcludedDirName,
   isHiddenName,
   truncateMiddle,
@@ -402,7 +403,6 @@ function buildFileMutation(
 // Bash safety limits
 // ------------------------------------------------------------------
 
-const BASH_MAX_TIMEOUT = 600; // 10 minutes hard cap (seconds)
 const BASH_MAX_OUTPUT_CHARS = 200_000; // ~200 KB text cap per stream
 const BASH_TIMEOUT_KILL_SIGNAL: NodeJS.Signals = "SIGKILL";
 // Env filtering and shell selection live in src/platform/shell. The

@@ -529,6 +529,10 @@ export interface RestoredSessionState {
   persistedModelSelection: PersistedModelSelection;
   preferredThinkingLevel: string;
   thinkingLevel: string;
+  /** Persisted agent mode ("" = default). Session coerces to AgentMode. */
+  mode: string;
+  /** Active goal (condition-driven continuation) — restored to keep running. */
+  goal: { condition: string; createdAt: number } | null;
   entries: LogEntry[];
   idAllocator: LogIdAllocator;
   usedContextIds: Set<string>;
@@ -653,6 +657,11 @@ export function parseRestoredState(
     persistedModelSelection,
     preferredThinkingLevel,
     thinkingLevel,
+    mode: meta.mode ?? "",
+    goal:
+      meta.goal && typeof meta.goal.condition === "string" && meta.goal.condition.trim()
+        ? { condition: meta.goal.condition, createdAt: meta.goal.createdAt ?? Date.now() }
+        : null,
     entries,
     idAllocator,
     usedContextIds,
