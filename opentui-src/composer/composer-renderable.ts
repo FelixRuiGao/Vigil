@@ -1,11 +1,15 @@
 // FermiComposerRenderable — the self-drawn composer widget.
 //
 // Extends the base forked Renderable (NOT the native EditBufferRenderable), so
-// it owns every byte of its rendering: it paints cells into the framebuffer,
-// draws its own reverse-video block cursor, and only parks a HIDDEN hardware
-// cursor at the caret so terminal IME candidate windows anchor correctly (the
-// same trick amp uses). All editing math comes from FermiComposerModel +
-// LayoutEngine — no native edit buffer, no native cursor rendering.
+// it owns every byte of its rendering: it paints cells into the framebuffer
+// and parks the REAL terminal cursor (visible, block style) at the caret —
+// the terminal owning the caret is what anchors IME candidate windows and
+// hides the cursor during composition. The glyph under the caret is drawn in
+// `cursorTextColor`: terminals like Terminal.app paint an opaque cursor box
+// over the cell without contrasting the glyph themselves, so a normally-lit
+// glyph would vanish under the block. All editing math comes from
+// FermiComposerModel + LayoutEngine — no native edit buffer, no native cursor
+// rendering.
 
 import {
   Renderable,
@@ -49,7 +53,11 @@ export interface FermiComposerOptions extends RenderableOptions<any> {
   selectionBg?: ColorInput;
   selectionFg?: ColorInput;
   cursorColor?: ColorInput;
-  /** Glyph color shown under the reverse-video block cursor. */
+  /**
+   * Glyph color drawn under the hardware block cursor. Terminals that
+   * contrast the glyph themselves (Ghostty) repaint it anyway; terminals that
+   * just draw an opaque box (Terminal.app) need this to keep it readable.
+   */
   cursorTextColor?: ColorInput;
   placeholder?: string;
   minLines?: number;
@@ -268,8 +276,27 @@ export class FermiComposerRenderable extends Renderable {
     const screenX = this._screenX;
     const screenY = this._screenY;
 
+    // Grapheme under the block cursor gets `cursorTextColor` so it survives
+    // terminals that paint an opaque cursor box without contrasting the glyph
+    // (Terminal.app). Terminals that repaint the glyph themselves (Ghostty)
+    // override this fg anyway.
+    const caretIdx = this._focused && this._showCursor ? this._model.cursor : -1;
+
     if (this._model.length === 0 && this._placeholder) {
-      buffer.drawText(this._placeholder, screenX, screenY, this._placeholderColorRgba);
+      if (caretIdx === 0) {
+        // Empty buffer → the cursor parks on the placeholder's first grapheme.
+        const graphemes = segmentGraphemes(this._placeholder);
+        const head = graphemes[0] ?? "";
+        buffer.drawText(head, screenX, screenY, this._cursorTextColor);
+        buffer.drawText(
+          this._placeholder.slice(head.length),
+          screenX + measureColumns(graphemes, 0, 1),
+          screenY,
+          this._placeholderColorRgba,
+        );
+      } else {
+        buffer.drawText(this._placeholder, screenX, screenY, this._placeholderColorRgba);
+      }
       return;
     }
 
@@ -284,7 +311,14 @@ export class FermiComposerRenderable extends Renderable {
         if (x < 0) continue; // straddling or left of the window edge
         if (x >= this.width) break;
         const selected = sel !== null && cell.graphemeIndex >= sel.start && cell.graphemeIndex < sel.end;
-        const fg = selected ? this._selectionFg : cell.tokenId ? this._tokenColor : this._textColor;
+        const fg =
+          cell.graphemeIndex === caretIdx
+            ? this._cursorTextColor
+            : selected
+              ? this._selectionFg
+              : cell.tokenId
+                ? this._tokenColor
+                : this._textColor;
         const bg = selected ? this._selectionBg : undefined;
         buffer.drawText(cell.grapheme, screenX + x, screenY, fg, bg);
       }
@@ -298,7 +332,14 @@ export class FermiComposerRenderable extends Renderable {
       for (const cell of line.cells) {
         if (cell.startCol >= this.width) break;
         const selected = sel !== null && cell.graphemeIndex >= sel.start && cell.graphemeIndex < sel.end;
-        const fg = selected ? this._selectionFg : cell.tokenId ? this._tokenColor : this._textColor;
+        const fg =
+          cell.graphemeIndex === caretIdx
+            ? this._cursorTextColor
+            : selected
+              ? this._selectionFg
+              : cell.tokenId
+                ? this._tokenColor
+                : this._textColor;
         const bg = selected ? this._selectionBg : undefined;
         buffer.drawText(cell.grapheme, screenX + cell.startCol, y, fg, bg);
       }
