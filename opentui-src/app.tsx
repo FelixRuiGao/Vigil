@@ -744,6 +744,15 @@ export function OpenTuiApp({
     autoSave();
   }, [autoSave, session]);
 
+  // Silent, like cyclePermissionMode — the bottom-row label and the border
+  // tint are the feedback; no hint toast.
+  const cycleAgentMode = useCallback(() => {
+    if (typeof session.setMode !== "function") return;
+    const next = nextAgentMode(coerceAgentMode(session.mode ?? "default"), 1);
+    session.setMode(next);
+    setAgentModeState(next);
+  }, [session]);
+
   const getAskQuestions = useCallback((): AgentQuestionItem[] => {
     if (!pendingAsk || pendingAsk.kind !== "agent_question") return [];
     return (pendingAsk.payload["questions"] as AgentQuestionItem[]) ?? [];
@@ -3078,22 +3087,24 @@ export function OpenTuiApp({
       }
     }
 
-    // Tab / Shift+Tab: cycle agent mode (default → vibe → scale → auto).
+    // Tab: cycle agent mode (default → vibe → scale → auto).
+    // Shift+Tab: cycle permission mode (read_only → reversible → yolo).
     // Guarded against every overlay explicitly — some overlay blocks above
     // fall through for Tab variants they don't handle (e.g. Shift+Tab in the
-    // command picker), and those must not leak into a mode switch. Selection
-    // is immediate in the UI; the prompt-side switch settles at the next send.
+    // command picker), and those must not leak into a cycle. Both are silent:
+    // the bottom-row labels are the feedback. The prompt-side mode switch
+    // settles at the next send.
     if (
       event.name === "tab" &&
       activeTabId === "main" &&
       !commandPicker && !checkboxPicker && !commandOverlay.visible &&
-      !promptSelect && !promptSecret && !pendingAsk &&
-      typeof session.setMode === "function"
+      !promptSelect && !promptSecret && !pendingAsk
     ) {
-      const next = nextAgentMode(coerceAgentMode(agentModeState), event.shift ? -1 : 1);
-      session.setMode(next);
-      setAgentModeState(next);
-      showHint(next === "default" ? "Mode: default" : `Mode: ${next} — takes effect with the next message`);
+      if (event.shift) {
+        cyclePermissionMode();
+      } else {
+        cycleAgentMode();
+      }
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -3334,7 +3345,7 @@ export function OpenTuiApp({
       usageText={usageText}
       permissionMode={permissionModeState}
       agentMode={agentModeState}
-      onModeClick={() => { void handleSubmit("/mode"); }}
+      onModeClick={cycleAgentMode}
       goalCreatedAt={goalCreatedAt}
       onGoalClick={() => { void handleSubmit("/goal"); }}
       presentationEntries={effectiveEntries}

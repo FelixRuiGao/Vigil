@@ -200,9 +200,24 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
     ? `${formatCompactTokensShort(contextTokens)}/${formatCompactTokensShort(contextLimit)}${cacheLabel}`
     : `${formatCompactTokensShort(contextTokens)}${cacheLabel}`;
 
-  // Mode tint: non-default modes color the border and show a text label in
-  // the bottom row. Default mode renders exactly as before.
+  // Mode tint: non-default modes color the border and their bottom-row label.
+  // Default keeps the dim border, and its label falls back to the normal text
+  // color — readable, but the absence of a tint is itself the "no special
+  // mode" signal (the dim gray is reserved for the keyboard-hint suffixes).
   const modeColor = agentMode ? MODE_COLORS[agentMode] : undefined;
+
+  const permissionColor = permissionMode === "yolo"
+    ? colors.red
+    : permissionMode === "read_only" ? "#2dd4a8" : colors.accent;
+  const permissionLabel = permissionMode === "yolo"
+    ? "Full auto"
+    : permissionMode === "read_only" ? "Read-only" : "Reversible";
+  // Fixed-width estimate of the bottom-left cluster for the usage-fits check:
+  // permission + " (Shift+Tab)" + " · " + mode + " (Tab)" (+ goal segment).
+  const bottomLeftLen =
+    permissionLabel.length + 12 +
+    (agentMode ? agentMode.length + 3 + 6 : 0) +
+    (goalCreatedAt ? formatGoalElapsedShort(goalCreatedAt).length + 8 : 0);
 
   return (
     <box flexDirection="column" gap={0} flexShrink={0}>
@@ -331,6 +346,7 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
       {!commandOverlayVisible && !commandPicker && !checkboxPicker && !promptSelect && !promptSecret && !pendingAsk ? (
         <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
           <box
+            flexDirection="row"
             flexShrink={1}
             flexGrow={0}
             cursor={!hint && onPermissionClick ? "pointer" : undefined}
@@ -339,19 +355,22 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
             {hint ? (
               <text fg={colors.dim} content={hint} truncate />
             ) : (
-              <text
-                fg={permissionMode === "yolo" ? colors.red : permissionMode === "read_only" ? "#2dd4a8" : colors.accent}
-                content={permissionMode === "yolo" ? "Full auto" : permissionMode === "read_only" ? "Read-only" : "Reversible"}
-              />
+              <>
+                <text fg={permissionColor} content={permissionLabel} />
+                <text fg={colors.dim} content=" (Shift+Tab)" />
+              </>
             )}
           </box>
-          {!hint && modeColor && agentMode ? (
+          {!hint && agentMode ? (
             <box
+              flexDirection="row"
               flexShrink={0}
               cursor="pointer"
               onMouseDown={(e: any) => { e.stopPropagation(); e.preventDefault(); onModeClick?.(); }}
             >
-              <text fg={modeColor} content={` · ${agentMode}`} />
+              <text fg={colors.dim} content=" · " />
+              <text fg={modeColor ?? colors.text} content={agentMode} />
+              <text fg={colors.dim} content=" (Tab)" />
             </box>
           ) : null}
           {!hint && goalCreatedAt ? (
@@ -364,7 +383,7 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
             </box>
           ) : null}
           <box flexGrow={1} />
-          {usageText && shouldShowUsage(contentWidth, 11, usageText.length, contextText.length) ? (
+          {usageText && shouldShowUsage(contentWidth, bottomLeftLen, usageText.length, contextText.length) ? (
             <text fg={colors.dim} content={`  ${usageText}`} flexShrink={0} />
           ) : null}
           <text fg={colors.dim} content={`  ${contextText}`} flexShrink={0} />
