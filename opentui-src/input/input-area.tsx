@@ -117,22 +117,63 @@ function getPhaseColor(phase: ActivityPhase, colors: ConversationPalette): strin
   return "#56B6C2";
 }
 
+interface BottomRowLayout {
+  showPermission: boolean;
+  showPermissionHint: boolean;
+  showMode: boolean;
+  showModeHint: boolean;
+  showUsage: boolean;
+  showGoal: boolean;
+}
+
 /**
- * Decide whether the usage indicator fits on the bottom row alongside cwd
- * and context. `hint` is NOT reserved — it has flexShrink={1} + truncate,
- * so it collapses to whatever space is left. If the fixed-shrink parts
- * (cwd + usage + context + separators) fit inside contentWidth, we show
- * the usage indicator; otherwise it's hidden entirely.
+ * Decide which optional segments of the bottom status row fit, instead of
+ * letting the terminal word-wrap them onto extra lines (each <text> wraps
+ * independently once it's forced to shrink below its content width — that's
+ * what produced the multi-line fold). `hint` bypasses this entirely (it
+ * replaces the whole left cluster and truncates itself).
+ *
+ * This is a strict priority CHAIN, not independent per-item fit checks: once
+ * one item in the order below doesn't fit, every item after it is cut too,
+ * even if a later item is individually shorter and would otherwise fit on
+ * its own. Without that cascade, " (Shift+Tab)" (12 cols) could fail to fit
+ * while the later, shorter " (Tab)" (6 cols) still did — making the two
+ * hints drop inconsistently instead of in a fixed order.
+ *
+ * Priority, highest first — context usage is never dropped:
+ * context > permission label > mode label > usage indicator > goal timer
+ * > " (Shift+Tab)" hint > " (Tab)" hint.
  */
-function shouldShowUsage(
+function computeBottomRowLayout(
   contentWidth: number,
-  cwdLen: number,
+  permissionLabelLen: number,
+  agentMode: string | undefined,
   usageLen: number,
+  goalLen: number,
   contextLen: number,
-): boolean {
+): BottomRowLayout {
   const inner = contentWidth - 2; // paddingLeft=1 + paddingRight=1
-  const fixedWidth = cwdLen + usageLen + contextLen + 4; // "  " × 2 separators
-  return inner >= fixedWidth;
+  let used = 2 + contextLen; // "  " + contextText — always reserved
+  let fits = true; // once false, every remaining (lower-priority) item is cut
+
+  const tryTake = (width: number): boolean => {
+    if (!fits) return false;
+    if (used + width > inner) {
+      fits = false;
+      return false;
+    }
+    used += width;
+    return true;
+  };
+
+  const showPermission = tryTake(permissionLabelLen);
+  const showMode = !!agentMode && tryTake(3 + agentMode.length); // " · " + mode
+  const showUsage = usageLen > 0 && tryTake(2 + usageLen); // "  " + usage
+  const showGoal = goalLen > 0 && tryTake(goalLen);
+  const showPermissionHint = showPermission && tryTake(12); // " (Shift+Tab)"
+  const showModeHint = showMode && tryTake(6); // " (Tab)"
+
+  return { showPermission, showPermissionHint, showMode, showModeHint, showUsage, showGoal };
 }
 
 function InputAreaInner(props: InputAreaProps): React.ReactNode {
@@ -212,12 +253,15 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
   const permissionLabel = permissionMode === "yolo"
     ? "Full auto"
     : permissionMode === "read_only" ? "Read-only" : "Reversible";
-  // Fixed-width estimate of the bottom-left cluster for the usage-fits check:
-  // permission + " (Shift+Tab)" + " · " + mode + " (Tab)" (+ goal segment).
-  const bottomLeftLen =
-    permissionLabel.length + 12 +
-    (agentMode ? agentMode.length + 3 + 6 : 0) +
-    (goalCreatedAt ? formatGoalElapsedShort(goalCreatedAt).length + 8 : 0);
+  const goalText = goalCreatedAt ? ` · goal ${formatGoalElapsedShort(goalCreatedAt)}` : "";
+  const bottomRowLayout = computeBottomRowLayout(
+    contentWidth,
+    permissionLabel.length,
+    agentMode,
+    usageText?.length ?? 0,
+    goalText.length,
+    contextText.length,
+  );
 
   return (
     <box flexDirection="column" gap={0} flexShrink={0}>
@@ -354,14 +398,14 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
           >
             {hint ? (
               <text fg={colors.dim} content={hint} truncate />
-            ) : (
+            ) : bottomRowLayout.showPermission ? (
               <>
                 <text fg={permissionColor} content={permissionLabel} />
-                <text fg={colors.dim} content=" (Shift+Tab)" />
+                {bottomRowLayout.showPermissionHint ? <text fg={colors.dim} content=" (Shift+Tab)" /> : null}
               </>
-            )}
+            ) : null}
           </box>
-          {!hint && agentMode ? (
+          {!hint && bottomRowLayout.showMode ? (
             <box
               flexDirection="row"
               flexShrink={0}
@@ -370,20 +414,20 @@ function InputAreaInner(props: InputAreaProps): React.ReactNode {
             >
               <text fg={colors.dim} content=" · " />
               <text fg={modeColor ?? colors.text} content={agentMode} />
-              <text fg={colors.dim} content=" (Tab)" />
+              {bottomRowLayout.showModeHint ? <text fg={colors.dim} content=" (Tab)" /> : null}
             </box>
           ) : null}
-          {!hint && goalCreatedAt ? (
+          {!hint && bottomRowLayout.showGoal ? (
             <box
               flexShrink={0}
               cursor="pointer"
               onMouseDown={(e: any) => { e.stopPropagation(); e.preventDefault(); onGoalClick?.(); }}
             >
-              <text fg={colors.dim} content={` · goal ${formatGoalElapsedShort(goalCreatedAt)}`} />
+              <text fg={colors.dim} content={goalText} />
             </box>
           ) : null}
           <box flexGrow={1} />
-          {usageText && shouldShowUsage(contentWidth, bottomLeftLen, usageText.length, contextText.length) ? (
+          {bottomRowLayout.showUsage && usageText ? (
             <text fg={colors.dim} content={`  ${usageText}`} flexShrink={0} />
           ) : null}
           <text fg={colors.dim} content={`  ${contextText}`} flexShrink={0} />
