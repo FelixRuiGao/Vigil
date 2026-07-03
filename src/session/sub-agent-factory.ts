@@ -15,7 +15,9 @@ import type { Config, ModelConfig } from "../config.js";
 import type { MCPClientManager } from "../mcp-client.js";
 import type { AgentModelEntry, ModelTierEntry } from "../persistence.js";
 import { SafePathError, safePath } from "../security/path.js";
-import { loadTemplate, validateTemplate } from "../templates/loader.js";
+import { CHILD_SESSION_CAPABILITIES } from "../session-capabilities.js";
+import { commToolNamesForCapabilities } from "../tool-runtime.js";
+import { assembleSystemPrompt, loadTemplate, validateTemplate } from "../templates/loader.js";
 
 const COMM_TOOL_NAMES = new Set([
   "spawn", "kill_agent", "check_status", "await_event", "show_context", "summarize_context", "ask", "skill",
@@ -79,6 +81,7 @@ export class SubAgentFactory {
       description: `Sub-agent '${taskId}' (${templateName})`,
     });
     this._applySubAgentConstraints(agent);
+    this._alignGuidelinesWithChildTools(agent, templateAgent.promptRecipe);
     return { agent, thinkingLevel };
   }
 
@@ -103,6 +106,7 @@ export class SubAgentFactory {
       description: `Sub-agent '${taskId}' (custom)`,
     });
     this._applySubAgentConstraints(agent);
+    this._alignGuidelinesWithChildTools(agent, templateAgent.promptRecipe);
     return { agent, thinkingLevel };
   }
 
@@ -154,6 +158,29 @@ export class SubAgentFactory {
     } catch { /* optional */ }
 
     return parts.join("\n\n");
+  }
+
+  /**
+   * Reassemble the child's system prompt so its generated Tool Guidelines
+   * section documents the tool set the child actually ends up with: the
+   * template tools minus what _applySubAgentConstraints stripped, plus the
+   * comm tools the child session's capabilities grant (ensureCommTools adds
+   * those at child-session init). The template-load-time prompt is built
+   * from the template's declared tools, which over-documents (e.g.
+   * bash_background on worker — stripped below) and under-documents
+   * (await_event — granted by capabilities, not declared).
+   */
+  private _alignGuidelinesWithChildTools(
+    agent: Agent,
+    recipe: Agent["promptRecipe"],
+  ): void {
+    if (!recipe) return;
+    agent.systemPrompt = assembleSystemPrompt(recipe, {
+      guidelineTools: [
+        ...agent.tools.map((t) => t.name),
+        ...commToolNamesForCapabilities(CHILD_SESSION_CAPABILITIES),
+      ],
+    });
   }
 
   private _applySubAgentConstraints(agent: Agent): void {
