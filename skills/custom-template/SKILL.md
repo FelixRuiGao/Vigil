@@ -23,12 +23,13 @@ type: agent
 name: my-template
 description: "Brief description of the agent's role."
 system_prompt_file: system_prompt.md
-tools: [read, util]
+tool_tier: read_only        # preferred: read_only | reversible | all
 max_tool_rounds: 100
 ```
 
 - `max_tool_rounds` is required and must be **>= 100**.
-- Tool set defaults to all packs when omitted.
+- The tool set is required: declare either `tool_tier` (preferred) or an explicit `tools` list — omitting both is a validation error.
+- Usage guides for the declared tools are generated into the sub-agent's system prompt automatically — write only the role and constraints, never tool documentation.
 
 **Tool packs** — use these in the `tools` field instead of listing individual tools:
 
@@ -39,7 +40,7 @@ max_tool_rounds: 100
 | `shell` | `bash`, `bash_background`, `bash_output`, `kill_shell` |
 | `util` | `time`, `web_search`, `web_fetch` |
 
-Packs and individual tool names can be mixed: `tools: [read, bash, time]`
+Packs and individual tool names can be mixed: `tools: [read, bash, time]`. Tiers expand to packs: `read_only` = read + util, `reversible` = read + edit + shell + util.
 
 **`system_prompt.md`:** Write a focused prompt for the sub-agent's role — include its specific task type, output expectations, and constraints.
 

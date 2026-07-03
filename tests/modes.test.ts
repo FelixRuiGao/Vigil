@@ -11,6 +11,7 @@ import {
   nextAgentMode,
 } from "../src/modes/index.js";
 import { buildContextGuidance } from "../src/modes/context-guidance.js";
+import { Config, resolveGuidanceTier } from "../src/config.js";
 import { appendModeCompactNote } from "../src/session/compact-prompts.js";
 import { ContextManager } from "../src/session/context-manager.js";
 import type { AgentMode } from "../src/modes/index.js";
@@ -75,6 +76,32 @@ describe("context guidance tiers", () => {
     expect(detailed).toContain("# Context Management — Recipes");
     expect(detailed).toContain("show_context");
     expect(detailed).toContain("summarize_context");
+  });
+});
+
+describe("guidance tier resolution", () => {
+  it("family heuristic: Claude/GPT standard, everything else detailed", () => {
+    expect(resolveGuidanceTier("claude-opus-4-6")).toBe("standard");
+    expect(resolveGuidanceTier("gpt-5.5")).toBe("standard");
+    expect(resolveGuidanceTier("o3")).toBe("standard");
+    expect(resolveGuidanceTier("kimi-k2.5")).toBe("detailed");
+    expect(resolveGuidanceTier("qwen3.5-9b")).toBe("detailed");
+  });
+
+  it("custom provider models can override guidance via settings", () => {
+    const cfg = new Config({
+      localProviders: {
+        "my-llm": {
+          baseUrl: "http://localhost:9999/v1",
+          models: [
+            { id: "strong-model", contextLength: 128_000, guidance: "standard" },
+            { id: "plain-model", contextLength: 128_000 },
+          ],
+        },
+      },
+    });
+    expect(cfg.getModel("my-llm:strong-model").guidance).toBe("standard");
+    expect(cfg.getModel("my-llm:plain-model").guidance).toBe("detailed");
   });
 });
 

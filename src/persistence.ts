@@ -555,6 +555,8 @@ export interface LocalModelEntry {
   multimodal?: boolean;
   thinkingLevels?: string[];
   webSearch?: boolean;
+  /** Prompt-pedagogy tier override (default: family heuristic). */
+  guidance?: "standard" | "detailed";
 }
 
 /**
@@ -700,6 +702,11 @@ export interface CustomModelEntry {
   thinking_levels?: string[];
   /** Native web search. Default false. */
   web_search?: boolean;
+  /**
+   * Prompt-pedagogy tier override. Default is a family heuristic (Claude/GPT
+   * ids → "standard", everything else → "detailed" recipes).
+   */
+  guidance?: "standard" | "detailed";
 }
 
 /** MCP server entry in settings.json. Same shape as the old mcp.json values. */
@@ -1660,6 +1667,7 @@ export function settingsToConfigInputs(settings: FermiSettings): {
               multimodal: m.multimodal,
               thinkingLevels: m.thinking_levels,
               webSearch: m.web_search,
+              guidance: m.guidance,
             }))
           : [{ id: entry.model!, contextLength: entry.context_length ?? 128_000 }];
         localProviders[id] = {

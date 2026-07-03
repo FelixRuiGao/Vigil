@@ -93,7 +93,12 @@ The single user-editable config file. Supports `//` and `/* */` comments (JSONC)
           "max_output_tokens": 16384,           // optional
           "multimodal": true,                   // optional, default false
           "thinking_levels": ["off", "low", "medium", "high"],  // optional
-          "web_search": false                   // optional, default false
+          "web_search": false,                  // optional, default false
+          "guidance": "standard"                // optional: "standard" | "detailed"
+          // Prompt-pedagogy tier. Default heuristic: Claude/GPT model ids get
+          // "standard" (principle-level prompts); everything else gets
+          // "detailed" (explicit context-management recipes in the prompt).
+          // Override for a strong open model you trust with principles.
         }
       ]
     },
@@ -141,6 +146,9 @@ The single user-editable config file. Supports `//` and `/* */` comments (JSONC)
   "auto_update": true,
 
   // ── Summarize hints (two-tier context awareness) ──
+  // When level1/level2 are NOT set explicitly, the scale and auto agent modes
+  // nudge earlier (40/65) while default/vibe use 50/75. Writing levels here
+  // counts as explicit configuration and wins in every mode.
   "summarize_hint": {
     "enabled": true,                              // master switch, default true
     "level1": 50,                                 // first hint trigger %, default 50
@@ -251,6 +259,10 @@ After editing MCP config (or SKILL.md files, or AGENTS.md), call the `reload` to
 | `/theme` | Set theme mode (auto / light / dark) |
 | `/diff` | Set write/edit diff display (compact / full) |
 | `/permission` | Set permission mode (read_only / reversible / yolo) |
+| `/mode` | Switch agent mode (default / vibe / scale / auto) — picker; **Tab** cycles modes, **Shift+Tab** cycles permission modes, and both bottom-row labels click-to-cycle |
+| `/goal` | Set a completion condition the session keeps working toward across turns (status / clear / replace via picker) |
+| `/key` | Manage provider API keys |
+| `/autocopy` | Toggle copy-on-select |
 | `/autoupdate` | Toggle automatic update checks |
 | `/summarize_hint` | Configure two-tier context summarize hints |
 | `/skills` | Enable/disable installed skills (checkbox picker) |

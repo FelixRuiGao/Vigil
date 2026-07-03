@@ -650,6 +650,7 @@ export class Config {
           supports_web_search: m.webSearch ?? false,
           ...(m.maxOutputTokens ? { max_tokens: m.maxOutputTokens } : {}),
           ...(m.thinkingLevels?.length ? { supports_thinking: true } : {}),
+          ...(m.guidance ? { guidance: m.guidance } : {}),
         };
       }
     }
