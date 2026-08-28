@@ -1,3 +1,5 @@
+
+
 # Fermi
 
 <p align="center">
@@ -117,7 +119,7 @@ Cloud or local, your choice. Switch at runtime with `/model`. `fermi init` handl
 
 ## Key Commands
 
-`/model` switch model · `/key` manage API keys · `/summarize` compress context · `/compact` full reset · `/rewind` undo turns + files · `/permission` safety mode · `/tier` sub-agent models · `/session` resume · `/fork` branch session · `/skills` manage skills · `/mcp` MCP tools
+`/model` switch model · `/key` manage API keys · `/summarize` compress context · `/compact` full reset · `/rewind` (`/undo`) undo turns + files · `/permission` safety mode · `/tier` sub-agent models · `/session` resume · `/fork` branch session · `/skills` manage skills · `/mcp` MCP tools
 
 [Full command reference →](https://felixruigao.github.io/Fermi/guide/commands)
 
